@@ -24,7 +24,7 @@
 <div id="root"></div>
 <script type="text/babel">
 
-const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxmw9p3x45554LvI8-VgAKSJ8-YpS3n3979N8OVr3wsx7E2nZlh_daj8jAZwhLQ-mD4KA/exec";
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycby43A-D_GCS5zN44PmF3OvSeEl3ZAFTsh3YrzO21FSoXRd7kBISwBKX9umKL78i61QnPw/exec";
 
 const c = {
   bg:"#0A0F1E",card:"#111827",cardBorder:"#1E2D45",
@@ -71,12 +71,25 @@ function overdueband(days){
   return             {label:"WRITE-OFF", color:"#6B7280",action:"Escalate immediately"};
 }
 
-// ── API ───────────────────────────────────────────────────────────────────────
+// ── API — JSONP for GET (bypasses CORS), no-cors for POST ────────────────────
 function apiGet(action){
-  return fetch(`${SCRIPT_URL}?action=${action}`).then(r=>r.json());
+  return new Promise((resolve,reject)=>{
+    const cbName="cb_"+Math.random().toString(36).slice(2,10);
+    const script=document.createElement("script");
+    window[cbName]=data=>{ try{delete window[cbName];document.body.removeChild(script);}catch(e){} resolve(data); };
+    script.onerror=()=>reject(new Error("Network error — check internet connection"));
+    script.src=SCRIPT_URL+"?action="+action+"&callback="+cbName;
+    document.body.appendChild(script);
+    setTimeout(()=>{ if(window[cbName]){delete window[cbName]; reject(new Error("Request timed out"));} },20000);
+  });
 }
 function apiPost(action,data){
-  return fetch(SCRIPT_URL,{method:"POST",body:JSON.stringify({action,data})}).then(r=>r.json());
+  return fetch(SCRIPT_URL,{
+    method:"POST",
+    mode:"no-cors",
+    headers:{"Content-Type":"text/plain"},
+    body:JSON.stringify({action,data})
+  }).then(()=>({success:true})).catch(e=>({error:e.message}));
 }
 
 // ── Data mappers ──────────────────────────────────────────────────────────────
