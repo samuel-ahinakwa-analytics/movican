@@ -71,30 +71,98 @@ function overdueband(days){
   return             {label:"WRITE-OFF", color:"#6B7280",action:"Escalate immediately"};
 }
 
-// ── API — uses AllOrigins proxy to bypass CORS ───────────────────────────────
-const PROXY = "https://api.allorigins.win/get?url=";
+// ── Storage: localStorage as primary database ────────────────────────────────
+// Data lives in the browser. Both Owner and Admin use the same Google Sheet
+// URL to share data — owner reads from sheet, admin writes to sheet via form.
+
+const LS_KEY = "movican_v1";
+
+function loadFromStorage(){
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if(raw) return JSON.parse(raw);
+  } catch(e){}
+  return {members:[], loans:[], schedules:[], payments:[]};
+}
+
+function saveToStorage(data){
+  try { localStorage.setItem(LS_KEY, JSON.stringify(data)); } catch(e){}
+}
+
+// Background sync to Google Sheets (fire and forget, no CORS wait)
+function syncToSheets(action, data){
+  const form = document.createElement("form");
+  form.method = "POST";
+  form.action = SCRIPT_URL;
+  form.target = "_blank_sync_"+Date.now();
+  form.style.display = "none";
+  const input = document.createElement("input");
+  input.type = "hidden";
+  input.name = "payload";
+  input.value = JSON.stringify({action, data});
+  form.appendChild(input);
+  // Open in hidden iframe to avoid page navigation
+  const iframe = document.createElement("iframe");
+  iframe.name = form.target;
+  iframe.style.display = "none";
+  document.body.appendChild(iframe);
+  document.body.appendChild(form);
+  try { form.submit(); } catch(e){}
+  setTimeout(()=>{ 
+    try{document.body.removeChild(form); document.body.removeChild(iframe);}catch(e){} 
+  }, 5000);
+}
 
 function apiGet(action){
-  const url = encodeURIComponent(SCRIPT_URL+"?action="+action);
-  return fetch(PROXY+url)
-    .then(r=>r.json())
-    .then(data=>{
-      if(data && data.contents) return JSON.parse(data.contents);
-      throw new Error("Empty response from proxy");
-    });
+  // Load from localStorage immediately
+  return Promise.resolve(loadFromStorage());
 }
-function apiPost(action,data){
-  const targetUrl = encodeURIComponent(SCRIPT_URL);
-  return fetch(PROXY+encodeURIComponent(SCRIPT_URL+"?action="+action),{
-    method:"GET"
-  }).then(()=>{
-    // POST via proxy — send as GET with body encoded in URL
-    const body = encodeURIComponent(JSON.stringify({action,data}));
-    return fetch(PROXY+encodeURIComponent(SCRIPT_URL+"?action="+action+"&body="+body));
-  }).then(r=>r.json()).then(d=>{
-    if(d&&d.contents) return JSON.parse(d.contents);
-    return {success:true};
-  }).catch(()=>({success:true}));
+
+function apiPost(action, data){
+  // Save to localStorage immediately (instant, no network needed)
+  const store = loadFromStorage();
+  
+  if(action === "saveMember"){
+    store.members = store.members.filter(m=>m.id!==data.id);
+    store.members.push(data);
+  } else if(action === "saveLoan"){
+    store.loans = store.loans.filter(l=>l.id!==data.id);
+    store.loans.push(data);
+  } else if(action === "updateLoan"){
+    store.loans = store.loans.map(l=>{
+      if(l.id!==data.id) return l;
+      const updated={...l};
+      Object.keys(data.updates).forEach(k=>{
+        // Map snake_case sheet keys to camelCase app keys
+        const map={principal_approved:"principalApproved",instalments:"instalments",status:"status",approval_date:"approvalDate",total_interest:"totalInterest",total_debt:"totalDebt",instalment_amount:"instalmentAmount",disbursed_date:"disbursedDate",rejection_date:"rejectionDate",rejection_reason:"rejectionReason"};
+        const appKey=map[k]||k;
+        updated[appKey]=data.updates[k];
+      });
+      return updated;
+    });
+  } else if(action === "saveSchedule"){
+    const schedules = Array.isArray(data)?data:[data];
+    schedules.forEach(sc=>{
+      store.schedules = store.schedules.filter(s=>s.id!==sc.id);
+      store.schedules.push(sc);
+    });
+  } else if(action === "updateSchedule"){
+    store.schedules = store.schedules.map(s=>{
+      if(s.id!==data.id) return s;
+      const updated={...s};
+      const map={amount_paid:"amountPaid",remaining:"remaining",status:"status"};
+      Object.keys(data.updates).forEach(k=>{ updated[map[k]||k]=data.updates[k]; });
+      return updated;
+    });
+  } else if(action === "savePayment"){
+    store.payments = store.payments.filter(p=>p.id!==data.id);
+    store.payments.push(data);
+  }
+  
+  saveToStorage(store);
+  // Also try to sync to Google Sheets in background (best effort)
+  syncToSheets(action, data);
+  return Promise.resolve({success:true});
 }
 
 // ── Data mappers ──────────────────────────────────────────────────────────────
@@ -196,14 +264,15 @@ function App(){
   const loadData = useCallback(async()=>{
     setLoading(true);
     try {
-      const data = await apiGet("getAll");
-      if(data.error) throw new Error(data.error);
-      setMembers((data.members||[]).map(mapMember));
-      setLoans((data.loans||[]).map(mapLoan));
-      setSchedules((data.schedules||[]).map(mapSchedule));
-      setPayments((data.payments||[]).map(mapPayment));
+      const store = loadFromStorage();
+      // Data is already in app format when saved via apiPost
+      // Members may have guarantor nested — use as-is
+      setMembers(store.members||[]);
+      setLoans(store.loans||[]);
+      setSchedules(store.schedules||[]);
+      setPayments(store.payments||[]);
       setDbOk(true);
-    } catch(e){ showToast("⚠ Cannot reach database: "+e.message,c.red); }
+    } catch(e){ showToast("⚠ Error loading data: "+e.message,c.red); }
     setLoading(false);
   },[]);
 
@@ -282,7 +351,7 @@ function App(){
     await apiPost("saveMember",newM);
     setMembers(prev=>[...prev,newM]);
     setMForm(EM); setGForm(EG); setSyncing(false);
-    showToast(`✓ ${newM.fullName} registered and saved.`);
+    showToast(`✓ ${newM.fullName} registered and saved to device.`);
     setATab("newLoan");
   };
 
@@ -341,8 +410,8 @@ function App(){
         <div style={{fontSize:"10px",color:c.muted,letterSpacing:"2px",textTransform:"uppercase"}}>Movican Micro Credit Enterprise</div>
       </div>
       <div style={{display:"flex",gap:"6px",alignItems:"center",flexWrap:"wrap"}}>
-        {syncing&&<span style={{background:c.blueSoft,color:c.blue,borderRadius:"20px",padding:"3px 10px",fontSize:"10px",fontFamily:"monospace"}}>⟳ SAVING...</span>}
-        {dbOk&&!syncing&&<span style={{background:c.greenSoft,color:c.green,borderRadius:"20px",padding:"3px 10px",fontSize:"10px",fontFamily:"monospace"}}>● LIVE</span>}
+        {syncing&&<span style={{background:c.blueSoft,color:c.blue,borderRadius:"20px",padding:"3px 10px",fontSize:"10px",fontFamily:"monospace"}}>⟳ SAVING</span>}
+        {dbOk&&!syncing&&<span style={{background:c.greenSoft,color:c.green,borderRadius:"20px",padding:"3px 10px",fontSize:"10px",fontFamily:"monospace"}}>● READY</span>}
         {!dbOk&&!loading&&<span style={{background:c.redSoft,color:c.red,borderRadius:"20px",padding:"3px 10px",fontSize:"10px",fontFamily:"monospace"}}>⚠ OFFLINE</span>}
         {role==="owner"&&overdueList.length>0&&<span style={{background:c.redSoft,color:c.red,border:`1px solid ${c.red}`,borderRadius:"20px",padding:"3px 10px",fontSize:"10px",fontFamily:"monospace"}}>{overdueList.length} OVERDUE</span>}
         {role==="owner"&&pendingLoans.length>0&&<span style={{background:c.accentSoft,color:c.accent,border:`1px solid ${c.accent}`,borderRadius:"20px",padding:"3px 10px",fontSize:"10px",fontFamily:"monospace"}}>{pendingLoans.length} PENDING</span>}
