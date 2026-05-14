@@ -71,97 +71,95 @@ function overdueband(days){
   return             {label:"WRITE-OFF", color:"#6B7280",action:"Escalate immediately"};
 }
 
-// ── Storage: localStorage as primary database ────────────────────────────────
-// Data lives in the browser. Both Owner and Admin use the same Google Sheet
-// URL to share data — owner reads from sheet, admin writes to sheet via form.
+// ── SheetDB API — real-time sync across all devices ─────────────────────────
+const DB = "https://sheetdb.io/api/v1/f92xvu27tqciq";
 
-const LS_KEY = "movican_v1";
-
-function loadFromStorage(){
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if(raw) return JSON.parse(raw);
-  } catch(e){}
-  return {members:[], loans:[], schedules:[], payments:[]};
+// SheetDB uses sheet name as the table. We read all sheets separately.
+function dbGet(sheet){
+  return fetch(`${DB}/sheets/${sheet}`)
+    .then(r=>r.json())
+    .catch(()=>[]);
+}
+function dbPost(sheet, row){
+  return fetch(`${DB}/sheets/${sheet}`,{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({data:[row]})
+  }).then(r=>r.json()).catch(e=>({error:e.message}));
+}
+function dbPatch(sheet, col, val, updates){
+  return fetch(`${DB}/sheets/${sheet}/${col}/${encodeURIComponent(val)}`,{
+    method:"PATCH",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({data:updates})
+  }).then(r=>r.json()).catch(e=>({error:e.message}));
 }
 
-function saveToStorage(data){
-  try { localStorage.setItem(LS_KEY, JSON.stringify(data)); } catch(e){}
+// ── Load all data ─────────────────────────────────────────────────────────────
+async function apiGet(action){
+  const [members,loans,schedules,payments] = await Promise.all([
+    dbGet("Members"),dbGet("Loans"),dbGet("Schedules"),dbGet("Payments")
+  ]);
+  return {members,loans,schedules,payments};
 }
 
-// Background sync to Google Sheets (fire and forget, no CORS wait)
-function syncToSheets(action, data){
-  const form = document.createElement("form");
-  form.method = "POST";
-  form.action = SCRIPT_URL;
-  form.target = "_blank_sync_"+Date.now();
-  form.style.display = "none";
-  const input = document.createElement("input");
-  input.type = "hidden";
-  input.name = "payload";
-  input.value = JSON.stringify({action, data});
-  form.appendChild(input);
-  // Open in hidden iframe to avoid page navigation
-  const iframe = document.createElement("iframe");
-  iframe.name = form.target;
-  iframe.style.display = "none";
-  document.body.appendChild(iframe);
-  document.body.appendChild(form);
-  try { form.submit(); } catch(e){}
-  setTimeout(()=>{ 
-    try{document.body.removeChild(form); document.body.removeChild(iframe);}catch(e){} 
-  }, 5000);
-}
-
-function apiGet(action){
-  // Load from localStorage immediately
-  return Promise.resolve(loadFromStorage());
-}
-
-function apiPost(action, data){
-  // Save to localStorage immediately (instant, no network needed)
-  const store = loadFromStorage();
-  
-  if(action === "saveMember"){
-    store.members = store.members.filter(m=>m.id!==data.id);
-    store.members.push(data);
-  } else if(action === "saveLoan"){
-    store.loans = store.loans.filter(l=>l.id!==data.id);
-    store.loans.push(data);
-  } else if(action === "updateLoan"){
-    store.loans = store.loans.map(l=>{
-      if(l.id!==data.id) return l;
-      const updated={...l};
-      Object.keys(data.updates).forEach(k=>{
-        // Map snake_case sheet keys to camelCase app keys
-        const map={principal_approved:"principalApproved",instalments:"instalments",status:"status",approval_date:"approvalDate",total_interest:"totalInterest",total_debt:"totalDebt",instalment_amount:"instalmentAmount",disbursed_date:"disbursedDate",rejection_date:"rejectionDate",rejection_reason:"rejectionReason"};
-        const appKey=map[k]||k;
-        updated[appKey]=data.updates[k];
-      });
-      return updated;
+// ── Write operations ──────────────────────────────────────────────────────────
+function apiPost(action,data){
+  if(action==="saveMember"){
+    const g=data.guarantor||{};
+    return dbPost("Members",{
+      member_id:data.id,full_name:data.fullName,phone:data.phone,
+      gender:data.gender,marital_status:data.maritalStatus,dob:data.dob,
+      residential_address:data.residentialAddress,home_town:data.homeTown,
+      dependents:data.dependents,type_of_business:data.typeOfBusiness,
+      business_location:data.businessLocation,place_of_worship:data.placeOfWorship,
+      worship_location:data.worshipLocation,ghana_card:data.ghanaCard,
+      digital_address:data.digitalAddress,alternate_momo:data.alternateMomo,
+      join_date:data.joinDate,
+      guarantor_name:g.name||"",guarantor_relationship:g.relationship||"",
+      guarantor_gender:g.gender||"",guarantor_marital_status:g.maritalStatus||"",
+      guarantor_dob:g.dob||"",guarantor_phone:g.phone||"",
+      guarantor_residential_address:g.residentialAddress||"",
+      guarantor_home_town:g.homeTown||"",guarantor_dependents:g.dependents||"",
+      guarantor_occupation:g.occupation||"",
+      guarantor_business_location:g.businessLocation||"",
+      guarantor_place_of_worship:g.placeOfWorship||"",
+      guarantor_worship_location:g.worshipLocation||""
     });
-  } else if(action === "saveSchedule"){
-    const schedules = Array.isArray(data)?data:[data];
-    schedules.forEach(sc=>{
-      store.schedules = store.schedules.filter(s=>s.id!==sc.id);
-      store.schedules.push(sc);
-    });
-  } else if(action === "updateSchedule"){
-    store.schedules = store.schedules.map(s=>{
-      if(s.id!==data.id) return s;
-      const updated={...s};
-      const map={amount_paid:"amountPaid",remaining:"remaining",status:"status"};
-      Object.keys(data.updates).forEach(k=>{ updated[map[k]||k]=data.updates[k]; });
-      return updated;
-    });
-  } else if(action === "savePayment"){
-    store.payments = store.payments.filter(p=>p.id!==data.id);
-    store.payments.push(data);
   }
-  
-  saveToStorage(store);
-  // Also try to sync to Google Sheets in background (best effort)
-  syncToSheets(action, data);
+  if(action==="saveLoan"){
+    return dbPost("Loans",{
+      loan_id:data.id,member_id:data.memberId,member_name:data.memberName,
+      principal_requested:data.principalRequested,principal_approved:data.principalApproved||"",
+      cycle:data.cycle,instalments:data.instalments,
+      purpose_of_loan:data.purposeOfLoan||"",
+      primary_source_of_repayment:data.primarySourceOfRepayment||"",
+      previous_loan_amount:data.previousLoanAmount||"",status:data.status,
+      submission_date:data.submissionDate,approval_date:"",disbursed_date:"",
+      rejection_date:"",rejection_reason:"",total_interest:"",total_debt:"",instalment_amount:""
+    });
+  }
+  if(action==="updateLoan"){
+    return dbPatch("Loans","loan_id",data.id,data.updates);
+  }
+  if(action==="saveSchedule"){
+    const schedules=Array.isArray(data)?data:[data];
+    return Promise.all(schedules.map(sc=>dbPost("Schedules",{
+      schedule_id:sc.id,loan_id:sc.loanId,instalment:sc.instalment,
+      due_date:sc.dueDate,amount_due:sc.amountDue,amount_paid:sc.amountPaid,
+      remaining:sc.remaining,status:sc.status
+    })));
+  }
+  if(action==="updateSchedule"){
+    return dbPatch("Schedules","schedule_id",data.id,data.updates);
+  }
+  if(action==="savePayment"){
+    return dbPost("Payments",{
+      payment_id:data.id,loan_id:data.loanId,member_name:data.memberName,
+      amount:data.amount,method:data.method,date:data.date,
+      receipt:data.receipt,sender_phone:data.senderPhone||""
+    });
+  }
   return Promise.resolve({success:true});
 }
 
@@ -264,15 +262,14 @@ function App(){
   const loadData = useCallback(async()=>{
     setLoading(true);
     try {
-      const store = loadFromStorage();
-      // Data is already in app format when saved via apiPost
-      // Members may have guarantor nested — use as-is
-      setMembers(store.members||[]);
-      setLoans(store.loans||[]);
-      setSchedules(store.schedules||[]);
-      setPayments(store.payments||[]);
+      const data = await apiGet("getAll");
+      if(data.error) throw new Error(data.error);
+      setMembers((data.members||[]).map(mapMember));
+      setLoans((data.loans||[]).map(mapLoan));
+      setSchedules((data.schedules||[]).map(mapSchedule));
+      setPayments((data.payments||[]).map(mapPayment));
       setDbOk(true);
-    } catch(e){ showToast("⚠ Error loading data: "+e.message,c.red); }
+    } catch(e){ showToast("⚠ Cannot connect: "+e.message,c.red); }
     setLoading(false);
   },[]);
 
@@ -351,7 +348,7 @@ function App(){
     await apiPost("saveMember",newM);
     setMembers(prev=>[...prev,newM]);
     setMForm(EM); setGForm(EG); setSyncing(false);
-    showToast(`✓ ${newM.fullName} registered and saved to device.`);
+    showToast(`✓ ${newM.fullName} registered and saved.`);
     setATab("newLoan");
   };
 
@@ -403,6 +400,14 @@ function App(){
   };
 
   // Header
+  const Footer = () => (
+    <div style={{textAlign:"center",padding:"32px 20px",borderTop:`1px solid ${c.border}`,marginTop:"20px"}}>
+      <div style={{fontSize:"10px",color:c.muted,letterSpacing:"1px",textTransform:"uppercase",fontFamily:"monospace"}}>Software developed by</div>
+      <div style={{fontSize:"13px",color:c.accent,fontWeight:"bold",marginTop:"3px"}}>Yafia Consulting</div>
+      <div style={{fontSize:"10px",color:c.muted,marginTop:"1px",fontStyle:"italic"}}>"Your Business Numbers Made Simple"</div>
+    </div>
+  );
+
   const Header = () => (
     <div style={{background:"linear-gradient(135deg,#0A0F1E 0%,#0F1E3A 100%)",borderBottom:`1px solid ${c.cardBorder}`,padding:"16px 28px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:100,flexWrap:"wrap",gap:"8px"}}>
       <div>
@@ -411,11 +416,11 @@ function App(){
       </div>
       <div style={{display:"flex",gap:"6px",alignItems:"center",flexWrap:"wrap"}}>
         {syncing&&<span style={{background:c.blueSoft,color:c.blue,borderRadius:"20px",padding:"3px 10px",fontSize:"10px",fontFamily:"monospace"}}>⟳ SAVING</span>}
-        {dbOk&&!syncing&&<span style={{background:c.greenSoft,color:c.green,borderRadius:"20px",padding:"3px 10px",fontSize:"10px",fontFamily:"monospace"}}>● READY</span>}
+        {dbOk&&!syncing&&<span style={{background:c.greenSoft,color:c.green,borderRadius:"20px",padding:"3px 10px",fontSize:"10px",fontFamily:"monospace"}}>● LIVE</span>}
         {!dbOk&&!loading&&<span style={{background:c.redSoft,color:c.red,borderRadius:"20px",padding:"3px 10px",fontSize:"10px",fontFamily:"monospace"}}>⚠ OFFLINE</span>}
         {role==="owner"&&overdueList.length>0&&<span style={{background:c.redSoft,color:c.red,border:`1px solid ${c.red}`,borderRadius:"20px",padding:"3px 10px",fontSize:"10px",fontFamily:"monospace"}}>{overdueList.length} OVERDUE</span>}
         {role==="owner"&&pendingLoans.length>0&&<span style={{background:c.accentSoft,color:c.accent,border:`1px solid ${c.accent}`,borderRadius:"20px",padding:"3px 10px",fontSize:"10px",fontFamily:"monospace"}}>{pendingLoans.length} PENDING</span>}
-        <span style={{background:role==="owner"?c.accentSoft:c.blueSoft,color:role==="owner"?c.accent:c.blue,border:`1px solid ${role==="owner"?c.accent:c.blue}`,borderRadius:"20px",padding:"3px 10px",fontSize:"10px",fontFamily:"monospace"}}>{role==="owner"?"👑 OWNER":"📋 ADMIN"}</span>
+        <span style={{background:role==="owner"?c.accentSoft:c.blueSoft,color:role==="owner"?c.accent:c.blue,border:`1px solid ${role==="owner"?c.accent:c.blue}`,borderRadius:"20px",padding:"3px 10px",fontSize:"10px",fontFamily:"monospace"}}>{role==="owner"?"👑 DIRECTOR":"📋 ADMIN"}</span>
         <button onClick={loadData} style={{background:"transparent",border:`1px solid ${c.border}`,borderRadius:"6px",padding:"3px 10px",color:c.muted,cursor:"pointer",fontSize:"12px"}} title="Refresh">↻</button>
         <button onClick={()=>setRole(null)} style={{background:"transparent",border:`1px solid ${c.border}`,borderRadius:"6px",padding:"3px 10px",color:c.muted,cursor:"pointer",fontSize:"10px",fontFamily:"monospace"}}>SWITCH</button>
       </div>
@@ -434,7 +439,7 @@ function App(){
         <div style={{display:"flex",gap:"16px",flexWrap:"wrap",justifyContent:"center"}}>
           <button onClick={()=>{setRole("owner");setTab("dashboard");}} style={{background:c.accentSoft,border:`2px solid ${c.accent}`,borderRadius:"12px",padding:"28px 40px",cursor:"pointer",color:c.accent,fontFamily:"Georgia,serif",fontSize:"16px",fontWeight:"bold",minWidth:"200px",animation:"fadeIn 0.3s ease"}}>
             <div style={{fontSize:"32px",marginBottom:"8px"}}>👑</div>
-            <div>Owner</div>
+            <div>Director</div>
             <div style={{fontSize:"11px",color:c.muted,marginTop:"4px",fontWeight:"normal"}}>Full dashboard + approvals</div>
           </button>
           <button onClick={()=>{setRole("admin");setATab("newMember");}} style={{background:c.blueSoft,border:`2px solid ${c.blue}`,borderRadius:"12px",padding:"28px 40px",cursor:"pointer",color:c.blue,fontFamily:"Georgia,serif",fontSize:"16px",fontWeight:"bold",minWidth:"200px",animation:"fadeIn 0.3s ease"}}>
@@ -442,6 +447,11 @@ function App(){
             <div>Administrator</div>
             <div style={{fontSize:"11px",color:c.muted,marginTop:"4px",fontWeight:"normal"}}>Data entry + payments</div>
           </button>
+        </div>
+        <div style={{marginTop:"48px",textAlign:"center",borderTop:`1px solid ${c.border}`,paddingTop:"24px",width:"100%",maxWidth:"500px"}}>
+          <div style={{fontSize:"11px",color:c.muted,letterSpacing:"1px",textTransform:"uppercase",fontFamily:"monospace"}}>Software developed by</div>
+          <div style={{fontSize:"16px",color:c.accent,fontWeight:"bold",marginTop:"4px",letterSpacing:"0.5px"}}>Yafia Consulting</div>
+          <div style={{fontSize:"10px",color:c.muted,marginTop:"2px",fontStyle:"italic"}}>"Your Business Numbers Made Simple"</div>
         </div>
       </>}
     </div>
@@ -642,6 +652,7 @@ function App(){
           </>;
         })()}
       </div>}
+      <Footer/>
     </div>
   );
 
@@ -759,6 +770,7 @@ function App(){
         </>}
 
       </div>}
+      <Footer/>
     </div>
   );
 }
