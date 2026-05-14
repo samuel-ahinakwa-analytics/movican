@@ -71,134 +71,145 @@ function overdueband(days){
   return             {label:"WRITE-OFF", color:"#6B7280",action:"Escalate immediately"};
 }
 
-// ── Database — Google Apps Script via no-cors POST ───────────────────────────
-// We use the Apps Script as backend. POST saves data. GET loads via script tag.
-const GAS = "https://script.google.com/macros/s/AKfycbxmw9p3x45554Lvl8-VgAKSJ8-YpS3n3979N8OVr3wsx7E2nZlh_daj8jAZwhLQ-mD4KA/exec";
+// ── SheetDB API — real-time sync across all devices ─────────────────────────
+const DB = "https://sheetdb.io/api/v1/zj3sa0i56b446";
 
-// Save to Google Sheets via no-cors POST (fire and forget)
-function gasPost(action, data){
-  return fetch(GAS, {
-    method: "POST",
-    mode: "no-cors",
-    headers: {"Content-Type": "text/plain"},
-    body: JSON.stringify({action, data})
-  }).then(()=>({success:true})).catch(()=>({success:true}));
-}
-
-// Load data via JSONP script tag (bypasses CORS on GET)
-function gasGet(){
-  return new Promise((resolve)=>{
-    const cb = "cb_"+Math.random().toString(36).slice(2,10);
-    const s  = document.createElement("script");
-    let done = false;
-    window[cb] = (d)=>{
-      done = true;
-      try{document.head.removeChild(s);}catch(e){}
-      delete window[cb];
-      resolve(d);
-    };
-    s.src = `${GAS}?action=getAll&callback=${cb}`;
-    s.onerror = ()=>{ if(!done){ done=true; delete window[cb]; resolve({members:[],loans:[],schedules:[],payments:[]}); } };
-    document.head.appendChild(s);
-    setTimeout(()=>{ if(!done){ done=true; delete window[cb]; try{document.head.removeChild(s);}catch(e){} resolve({members:[],loans:[],schedules:[],payments:[]}); } }, 15000);
-  });
-}
-
-// localStorage cache — keeps data visible instantly while GAS syncs
-const LS = "movican_db_v2";
+// localStorage cache for instant UI
+const LS = "movican_db_v3";
 function lsLoad(){ try{ const r=localStorage.getItem(LS); return r?JSON.parse(r):{members:[],loans:[],schedules:[],payments:[]}; }catch(e){ return {members:[],loans:[],schedules:[],payments:[]}; } }
-function lsSave(db){ try{ localStorage.setItem(LS, JSON.stringify(db)); }catch(e){} }
+function lsSave(db){ try{ localStorage.setItem(LS,JSON.stringify(db)); }catch(e){} }
 
-async function apiGet(action){
-  // First return localStorage instantly for speed
-  const cached = lsLoad();
-  // Then try to get fresh data from GAS in background
-  try {
-    const fresh = await gasGet();
-    if(fresh && (fresh.members||fresh.loans)){
-      lsSave(fresh);
-      return fresh;
-    }
-  } catch(e){}
-  return cached;
+// SheetDB read
+function dbGet(sheet){
+  return fetch(`${DB}?sheet=${encodeURIComponent(sheet)}`,{
+    headers:{"Accept":"application/json"}
+  }).then(r=>r.json()).catch(()=>[]);
 }
 
-function apiPost(action, data){
-  // 1. Update localStorage immediately (instant UI update)
+// SheetDB write
+function dbPost(sheet,row){
+  return fetch(`${DB}?sheet=${encodeURIComponent(sheet)}`,{
+    method:"POST",
+    headers:{"Content-Type":"application/json","Accept":"application/json"},
+    body:JSON.stringify({data:[row]})
+  }).then(r=>r.json()).catch(e=>({error:e.message}));
+}
+
+// SheetDB update
+function dbPatch(sheet,col,val,updates){
+  return fetch(`${DB}/${encodeURIComponent(col)}/${encodeURIComponent(val)}?sheet=${encodeURIComponent(sheet)}`,{
+    method:"PATCH",
+    headers:{"Content-Type":"application/json","Accept":"application/json"},
+    body:JSON.stringify({data:updates})
+  }).then(r=>r.json()).catch(e=>({error:e.message}));
+}
+
+// Load all data from SheetDB
+async function apiGet(action){
+  // Show cached data instantly
+  const cached = lsLoad();
+  try {
+    const [members,loans,schedules,payments] = await Promise.all([
+      dbGet("Members"),dbGet("Loans"),dbGet("Schedules"),dbGet("Payments")
+    ]);
+    const fresh = {members:members||[],loans:loans||[],schedules:schedules||[],payments:payments||[]};
+    lsSave(fresh);
+    return fresh;
+  } catch(e){
+    return cached;
+  }
+}
+
+// Write to SheetDB + update localStorage
+function apiPost(action,data){
   const db = lsLoad();
+
   if(action==="saveMember"){
-    db.members = db.members.filter(m=>m.member_id!==data.id);
     const g=data.guarantor||{};
-    db.members.push({
-      member_id:data.id, full_name:data.fullName, phone:data.phone,
-      gender:data.gender, marital_status:data.maritalStatus, dob:data.dob,
-      residential_address:data.residentialAddress, home_town:data.homeTown,
-      dependents:data.dependents, type_of_business:data.typeOfBusiness,
-      business_location:data.businessLocation, place_of_worship:data.placeOfWorship,
-      worship_location:data.worshipLocation, ghana_card:data.ghanaCard,
-      digital_address:data.digitalAddress, alternate_momo:data.alternateMomo,
+    const row={
+      member_id:data.id,full_name:data.fullName,phone:data.phone,
+      gender:data.gender,marital_status:data.maritalStatus,dob:data.dob,
+      residential_address:data.residentialAddress,home_town:data.homeTown,
+      dependents:data.dependents,type_of_business:data.typeOfBusiness,
+      business_location:data.businessLocation,place_of_worship:data.placeOfWorship,
+      worship_location:data.worshipLocation,ghana_card:data.ghanaCard,
+      digital_address:data.digitalAddress,alternate_momo:data.alternateMomo,
       join_date:data.joinDate,
-      guarantor_name:g.name||"", guarantor_relationship:g.relationship||"",
-      guarantor_gender:g.gender||"", guarantor_marital_status:g.maritalStatus||"",
-      guarantor_dob:g.dob||"", guarantor_phone:g.phone||"",
+      guarantor_name:g.name||"",guarantor_relationship:g.relationship||"",
+      guarantor_gender:g.gender||"",guarantor_marital_status:g.maritalStatus||"",
+      guarantor_dob:g.dob||"",guarantor_phone:g.phone||"",
       guarantor_residential_address:g.residentialAddress||"",
-      guarantor_home_town:g.homeTown||"", guarantor_dependents:g.dependents||"",
+      guarantor_home_town:g.homeTown||"",guarantor_dependents:g.dependents||"",
       guarantor_occupation:g.occupation||"",
       guarantor_business_location:g.businessLocation||"",
       guarantor_place_of_worship:g.placeOfWorship||"",
       guarantor_worship_location:g.worshipLocation||""
-    });
-  } else if(action==="saveLoan"){
-    db.loans = db.loans.filter(l=>l.loan_id!==data.id);
-    db.loans.push({
-      loan_id:data.id, member_id:data.memberId, member_name:data.memberName,
-      principal_requested:data.principalRequested, principal_approved:data.principalApproved||"",
-      cycle:data.cycle, instalments:data.instalments,
+    };
+    db.members=db.members.filter(m=>m.member_id!==data.id);
+    db.members.push(row);
+    lsSave(db);
+    return dbPost("Members",row);
+  }
+
+  if(action==="saveLoan"){
+    const row={
+      loan_id:data.id,member_id:data.memberId,member_name:data.memberName,
+      principal_requested:data.principalRequested,principal_approved:"",
+      cycle:data.cycle,instalments:data.instalments,
       purpose_of_loan:data.purposeOfLoan||"",
       primary_source_of_repayment:data.primarySourceOfRepayment||"",
-      previous_loan_amount:data.previousLoanAmount||"", status:data.status,
-      submission_date:data.submissionDate, approval_date:"", disbursed_date:"",
-      rejection_date:"", rejection_reason:"", total_interest:"",
-      total_debt:"", instalment_amount:""
-    });
-  } else if(action==="updateLoan"){
-    db.loans = db.loans.map(l=>{
+      previous_loan_amount:data.previousLoanAmount||"",status:data.status,
+      submission_date:data.submissionDate,approval_date:"",disbursed_date:"",
+      rejection_date:"",rejection_reason:"",total_interest:"",total_debt:"",instalment_amount:""
+    };
+    db.loans=db.loans.filter(l=>l.loan_id!==data.id);
+    db.loans.push(row);
+    lsSave(db);
+    return dbPost("Loans",row);
+  }
+
+  if(action==="updateLoan"){
+    db.loans=db.loans.map(l=>{
       if(l.loan_id!==data.id) return l;
-      const u={...l}; const ups=data.updates;
-      if(ups.status) u.status=ups.status;
-      if(ups.principal_approved) u.principal_approved=ups.principal_approved;
-      if(ups.instalments) u.instalments=ups.instalments;
-      if(ups.approval_date) u.approval_date=ups.approval_date;
-      if(ups.total_interest) u.total_interest=ups.total_interest;
-      if(ups.total_debt) u.total_debt=ups.total_debt;
-      if(ups.instalment_amount) u.instalment_amount=ups.instalment_amount;
-      if(ups.disbursed_date) u.disbursed_date=ups.disbursed_date;
-      if(ups.rejection_date) u.rejection_date=ups.rejection_date;
-      if(ups.rejection_reason) u.rejection_reason=ups.rejection_reason;
+      const u={...l};
+      Object.keys(data.updates).forEach(k=>{ u[k]=data.updates[k]; });
       return u;
     });
-  } else if(action==="saveSchedule"){
+    lsSave(db);
+    return dbPatch("Loans","loan_id",data.id,data.updates);
+  }
+
+  if(action==="saveSchedule"){
     const schs=Array.isArray(data)?data:[data];
     schs.forEach(sc=>{
+      const row={schedule_id:sc.id,loan_id:sc.loanId,instalment:sc.instalment,due_date:sc.dueDate,amount_due:sc.amountDue,amount_paid:sc.amountPaid,remaining:sc.remaining,status:sc.status};
       db.schedules=db.schedules.filter(s=>s.schedule_id!==sc.id);
-      db.schedules.push({schedule_id:sc.id,loan_id:sc.loanId,instalment:sc.instalment,due_date:sc.dueDate,amount_due:sc.amountDue,amount_paid:sc.amountPaid,remaining:sc.remaining,status:sc.status});
+      db.schedules.push(row);
     });
-  } else if(action==="updateSchedule"){
+    lsSave(db);
+    const schs2=Array.isArray(data)?data:[data];
+    return Promise.all(schs2.map(sc=>dbPost("Schedules",{schedule_id:sc.id,loan_id:sc.loanId,instalment:sc.instalment,due_date:sc.dueDate,amount_due:sc.amountDue,amount_paid:sc.amountPaid,remaining:sc.remaining,status:sc.status})));
+  }
+
+  if(action==="updateSchedule"){
     db.schedules=db.schedules.map(s=>{
       if(s.schedule_id!==data.id) return s;
-      const u={...s},ups=data.updates;
-      if(ups.amount_paid!==undefined) u.amount_paid=ups.amount_paid;
-      if(ups.remaining!==undefined) u.remaining=ups.remaining;
-      if(ups.status) u.status=ups.status;
+      const u={...s};
+      Object.keys(data.updates).forEach(k=>{ u[k]=data.updates[k]; });
       return u;
     });
-  } else if(action==="savePayment"){
-    db.payments=db.payments.filter(p=>p.payment_id!==data.id);
-    db.payments.push({payment_id:data.id,loan_id:data.loanId,member_name:data.memberName,amount:data.amount,method:data.method,date:data.date,receipt:data.receipt,sender_phone:data.senderPhone||""});
+    lsSave(db);
+    return dbPatch("Schedules","schedule_id",data.id,data.updates);
   }
-  lsSave(db);
-  // 2. Also fire to Google Sheets in background (best effort)
-  gasPost(action, data);
+
+  if(action==="savePayment"){
+    const row={payment_id:data.id,loan_id:data.loanId,member_name:data.memberName,amount:data.amount,method:data.method,date:data.date,receipt:data.receipt,sender_phone:data.senderPhone||""};
+    db.payments=db.payments.filter(p=>p.payment_id!==data.id);
+    db.payments.push(row);
+    lsSave(db);
+    return dbPost("Payments",row);
+  }
+
   return Promise.resolve({success:true});
 }
 
@@ -302,9 +313,9 @@ function App(){
   const loadData = useCallback(async()=>{
     setLoading(true);
     try {
-      // Load from localStorage first (instant)
+      // Show cached data instantly while fetching fresh
       const cached = lsLoad();
-      if(cached.members.length||cached.loans.length||cached.schedules.length||cached.payments.length){
+      if(cached.members.length||cached.loans.length){
         setMembers((cached.members||[]).map(mapMember));
         setLoans((cached.loans||[]).map(mapLoan));
         setSchedules((cached.schedules||[]).map(mapSchedule));
@@ -312,9 +323,9 @@ function App(){
         setDbOk(true);
         setLoading(false);
       }
-      // Then try fresh from Google Sheets in background
+      // Fetch fresh from SheetDB
       const fresh = await apiGet("getAll");
-      if(fresh && fresh.members){
+      if(fresh && Array.isArray(fresh.members)){
         setMembers((fresh.members||[]).map(mapMember));
         setLoans((fresh.loans||[]).map(mapLoan));
         setSchedules((fresh.schedules||[]).map(mapSchedule));
@@ -383,13 +394,18 @@ function App(){
   // Disburse
   const markDisbursed = async loan => {
     setSyncing(true);
+    // Use the latest loan data from state to ensure approved values are used
+    const currentLoan = loans.find(l=>l.id===loan.id) || loan;
+    const approvalDate = currentLoan.approvalDate || todayStr;
+    const instalments  = Number(currentLoan.instalments) || Number(loan.instalments);
+    const instalmentAmt = Number(currentLoan.instalmentAmount) || Number(loan.instalmentAmount);
     await apiPost("updateLoan",{id:loan.id,updates:{status:"ACTIVE",disbursed_date:todayStr}});
-    const newSch=genSchedule(loan.id,loan.approvalDate,loan.cycle,loan.instalments,loan.instalmentAmount);
+    const newSch=genSchedule(loan.id,approvalDate,currentLoan.cycle||loan.cycle,instalments,instalmentAmt);
     await apiPost("saveSchedule",newSch);
     setLoans(prev=>prev.map(l=>l.id===loan.id?{...l,status:"ACTIVE",disbursedDate:todayStr}:l));
     setSchedules(prev=>[...prev,...newSch]);
     setSyncing(false);
-    showToast(`✓ Loan ${loan.id} is now ACTIVE.`,c.blue);
+    showToast(`✓ Loan ${loan.id} is now ACTIVE — schedule generated for ${GHS(instalmentAmt)} x ${instalments} instalments.`,c.blue);
   };
 
   // Submit member
@@ -678,13 +694,14 @@ function App(){
             <div style={CARD}>
               <table style={{width:"100%",borderCollapse:"collapse"}}>
                 <thead><tr>
-                  <th style={TH}>ID</th><th style={TH}>Member</th><th style={TH}>Amount</th>
-                  <th style={TH}>Cycle</th><th style={TH}>Status</th><th style={TH}>Action</th>
+                  <th style={TH}>ID</th><th style={TH}>Member</th><th style={TH}>Requested</th>
+                  <th style={TH}>Approved</th><th style={TH}>Cycle</th><th style={TH}>Status</th><th style={TH}>Action</th>
                 </tr></thead>
                 <tbody>{loans.map(l=><tr key={l.id}>
                   <td style={{...TD,fontFamily:"monospace",color:c.accent}}>{l.id}</td>
                   <td style={TD}>{l.memberName}</td>
-                  <td style={{...TD,fontFamily:"monospace"}}>{GHS(l.principalRequested)}</td>
+                  <td style={{...TD,fontFamily:"monospace",color:c.muted,fontSize:"11px"}}>{GHS(l.principalRequested)}</td>
+                  <td style={{...TD,fontFamily:"monospace",color:l.principalApproved?c.green:c.muted}}>{l.principalApproved?GHS(l.principalApproved):"Pending"}</td>
                   <td style={TD}>{l.cycle}</td>
                   <td style={TD}><span style={pill(l.status)}>{l.status}</span></td>
                   <td style={TD}>
