@@ -422,22 +422,65 @@ function App(){
         {role==="owner"&&pendingLoans.length>0&&<span style={{background:c.accentSoft,color:c.accent,border:`1px solid ${c.accent}`,borderRadius:"20px",padding:"3px 10px",fontSize:"10px",fontFamily:"monospace"}}>{pendingLoans.length} PENDING</span>}
         <span style={{background:role==="owner"?c.accentSoft:c.blueSoft,color:role==="owner"?c.accent:c.blue,border:`1px solid ${role==="owner"?c.accent:c.blue}`,borderRadius:"20px",padding:"3px 10px",fontSize:"10px",fontFamily:"monospace"}}>{role==="owner"?"👑 DIRECTOR":"📋 ADMIN"}</span>
         <button onClick={loadData} style={{background:"transparent",border:`1px solid ${c.border}`,borderRadius:"6px",padding:"3px 10px",color:c.muted,cursor:"pointer",fontSize:"12px"}} title="Refresh">↻</button>
-        <button onClick={()=>setRole(null)} style={{background:"transparent",border:`1px solid ${c.border}`,borderRadius:"6px",padding:"3px 10px",color:c.muted,cursor:"pointer",fontSize:"10px",fontFamily:"monospace"}}>SWITCH</button>
+{role==="owner"&&<button onClick={()=>setRole(null)} style={{background:"transparent",border:`1px solid ${c.border}`,borderRadius:"6px",padding:"3px 10px",color:c.muted,cursor:"pointer",fontSize:"10px",fontFamily:"monospace"}}>LOGOUT</button>}
       </div>
     </div>
   );
+
+  // Password modal state
+  const [showPwModal,setShowPwModal] = useState(false);
+  const [pwInput,setPwInput] = useState("");
+  const [pwError,setPwError] = useState("");
+  const DIRECTOR_PASSWORD = "movican2026";
+
+  const handleDirectorLogin = () => {
+    if(pwInput === DIRECTOR_PASSWORD){
+      setRole("owner"); setTab("dashboard");
+      setShowPwModal(false); setPwInput(""); setPwError("");
+    } else {
+      setPwError("Incorrect password. Please try again.");
+      setPwInput("");
+    }
+  };
 
   // Role selection
   if(!role) return (
     <div style={{minHeight:"100vh",background:c.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"20px"}}>
       {loading&&<Spinner msg="Connecting to Google Sheets..."/>}
+
+      {showPwModal&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:"20px"}}>
+          <div style={{background:c.card,border:`1px solid ${c.accent}`,borderRadius:"16px",padding:"32px",width:"380px",maxWidth:"100%",textAlign:"center"}}>
+            <div style={{fontSize:"32px",marginBottom:"12px"}}>👑</div>
+            <div style={{fontSize:"17px",fontWeight:"bold",color:c.accent,marginBottom:"4px"}}>Director Access</div>
+            <div style={{fontSize:"12px",color:c.muted,marginBottom:"24px"}}>Enter your password to continue</div>
+            <input
+              type="password"
+              value={pwInput}
+              onChange={e=>{setPwInput(e.target.value);setPwError("");}}
+              onKeyDown={e=>e.key==="Enter"&&handleDirectorLogin()}
+              placeholder="Enter password"
+              autoFocus
+              style={{background:"#060D1A",border:`1px solid ${c.accent}`,borderRadius:"6px",padding:"12px",color:c.text,fontFamily:"monospace",fontSize:"16px",letterSpacing:"4px",width:"100%",boxSizing:"border-box",outline:"none",textAlign:"center",marginBottom:"12px"}}
+            />
+            {pwError&&<div style={{color:c.red,fontSize:"12px",marginBottom:"12px",fontFamily:"monospace"}}>{pwError}</div>}
+            <button onClick={handleDirectorLogin} style={{background:c.accent,color:"#000",border:"none",borderRadius:"8px",padding:"12px 24px",cursor:"pointer",fontWeight:"bold",fontSize:"14px",width:"100%",fontFamily:"Georgia,serif",marginBottom:"8px"}}>
+              ENTER
+            </button>
+            <button onClick={()=>{setShowPwModal(false);setPwInput("");setPwError("");}} style={{background:"transparent",color:c.muted,border:`1px solid ${c.border}`,borderRadius:"8px",padding:"10px 24px",cursor:"pointer",fontSize:"13px",width:"100%",fontFamily:"Georgia,serif"}}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {!loading&&<>
         <div style={{fontSize:"12px",color:c.accent,letterSpacing:"3px",textTransform:"uppercase",fontFamily:"monospace",marginBottom:"8px"}}>Welcome to</div>
         <div style={{fontSize:"26px",fontWeight:"bold",color:c.text,marginBottom:"2px",textAlign:"center"}}>MOVICAN MICRO CREDIT</div>
         <div style={{fontSize:"12px",color:c.muted,marginBottom:"8px",letterSpacing:"1px"}}>ENTERPRISE</div>
-        <div style={{fontSize:"11px",color:dbOk?c.green:c.red,fontFamily:"monospace",marginBottom:"32px"}}>{dbOk?"● Connected to Google Sheets":"⚠ Database connection issue"}</div>
+        <div style={{fontSize:"11px",color:dbOk?c.green:c.red,fontFamily:"monospace",marginBottom:"32px"}}>{dbOk?"● Connected — Live data across all devices":"⚠ Connecting to database..."}</div>
         <div style={{display:"flex",gap:"16px",flexWrap:"wrap",justifyContent:"center"}}>
-          <button onClick={()=>{setRole("owner");setTab("dashboard");}} style={{background:c.accentSoft,border:`2px solid ${c.accent}`,borderRadius:"12px",padding:"28px 40px",cursor:"pointer",color:c.accent,fontFamily:"Georgia,serif",fontSize:"16px",fontWeight:"bold",minWidth:"200px",animation:"fadeIn 0.3s ease"}}>
+          <button onClick={()=>setShowPwModal(true)} style={{background:c.accentSoft,border:`2px solid ${c.accent}`,borderRadius:"12px",padding:"28px 40px",cursor:"pointer",color:c.accent,fontFamily:"Georgia,serif",fontSize:"16px",fontWeight:"bold",minWidth:"200px",animation:"fadeIn 0.3s ease"}}>
             <div style={{fontSize:"32px",marginBottom:"8px"}}>👑</div>
             <div>Director</div>
             <div style={{fontSize:"11px",color:c.muted,marginTop:"4px",fontWeight:"normal"}}>Full dashboard + approvals</div>
@@ -457,50 +500,6 @@ function App(){
     </div>
   );
 
-  // Modals
-  const ApproveModal = () => !appModal ? null : (
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:"20px"}}>
-      <div style={{background:c.card,border:`1px solid ${c.accent}`,borderRadius:"16px",padding:"28px",width:"520px",maxWidth:"100%",maxHeight:"90vh",overflowY:"auto"}}>
-        <div style={{fontSize:"17px",fontWeight:"bold",color:c.accent,marginBottom:"18px"}}>⚡ Authorise Loan — {appModal.loan.id}</div>
-        {[["Member",appModal.loan.memberName,c.text],["Requested",GHS(appModal.loan.principalRequested),c.muted],["Cycle",appModal.loan.cycle,c.text],["Purpose",appModal.loan.purposeOfLoan||"—",c.muted]].map(([l,v,col])=>(
-          <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:`1px solid ${c.border}`,fontSize:"13px"}}><span style={{color:c.muted}}>{l}</span><span style={{color:col,fontFamily:"monospace",fontWeight:"bold"}}>{v}</span></div>
-        ))}
-        <div style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:`1px solid ${c.border}`,fontSize:"13px",alignItems:"center"}}>
-          <span style={{color:c.muted}}>Amount to Approve <span style={{color:c.accent}}>(editable)</span></span>
-          <input style={{background:"#0A0F1E",border:`1px solid ${c.accent}`,borderRadius:"6px",padding:"5px 9px",color:c.text,fontFamily:"monospace",fontSize:"13px",width:"130px",textAlign:"right"}} type="number" value={appModal.approvedAmount} onChange={e=>updateApp("approvedAmount",e.target.value)}/>
-        </div>
-        <div style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:`1px solid ${c.border}`,fontSize:"13px",alignItems:"center"}}>
-          <span style={{color:c.muted}}>No. of Instalments <span style={{color:c.accent}}>(editable)</span></span>
-          <input style={{background:"#0A0F1E",border:`1px solid ${c.accent}`,borderRadius:"6px",padding:"5px 9px",color:c.text,fontFamily:"monospace",fontSize:"13px",width:"130px",textAlign:"right"}} type="number" min="1" value={appModal.approvedInstalments} onChange={e=>updateApp("approvedInstalments",e.target.value)}/>
-        </div>
-        <div style={{margin:"12px 0 4px",padding:"12px",background:c.accentSoft,borderRadius:"8px"}}>
-          <div style={{fontSize:"10px",color:c.muted,letterSpacing:"1px",marginBottom:"8px",textTransform:"uppercase"}}>Auto-Calculated</div>
-          {[["Duration",`${(appModal.months||0).toFixed(2)} months`,c.text],["Interest (5%/month)",GHS(appModal.totalInterest),c.accent],["Total Debt",GHS(appModal.totalDebt),c.green],["Per Instalment",GHS(appModal.instalmentAmount),c.text]].map(([l,v,col])=>(
-            <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${c.border}`,fontSize:"13px"}}><span style={{color:c.muted}}>{l}</span><span style={{color:col,fontFamily:"monospace",fontWeight:"bold"}}>{v}</span></div>
-          ))}
-        </div>
-        <div style={{marginTop:"10px",padding:"8px 12px",background:c.redSoft,borderRadius:"8px",fontSize:"11px",color:c.red}}>⚠ Once authorised, this record is permanently locked.</div>
-        <button disabled={syncing} onClick={confirmApprove} style={{background:syncing?c.muted:c.green,color:"#fff",border:"none",borderRadius:"8px",padding:"11px 20px",cursor:syncing?"not-allowed":"pointer",fontWeight:"bold",fontSize:"13px",width:"100%",marginTop:"18px",fontFamily:"Georgia,serif"}}>{syncing?"Saving...":"✓ AUTHORISE LOAN"}</button>
-        <button onClick={()=>setAppModal(null)} style={{background:"transparent",color:c.muted,border:`1px solid ${c.border}`,borderRadius:"8px",padding:"11px 20px",cursor:"pointer",fontSize:"13px",width:"100%",marginTop:"8px",fontFamily:"Georgia,serif"}}>Cancel</button>
-      </div>
-    </div>
-  );
-
-  const RejectModal = () => !rejModal ? null : (
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:"20px"}}>
-      <div style={{background:c.card,border:`1px solid ${c.red}`,borderRadius:"16px",padding:"28px",width:"480px",maxWidth:"100%"}}>
-        <div style={{fontSize:"17px",fontWeight:"bold",color:c.red,marginBottom:"6px"}}>✕ Reject Loan — {rejModal.id}</div>
-        <div style={{fontSize:"12px",color:c.muted,marginBottom:"20px"}}>Member can reapply. Reason saved permanently.</div>
-        {[["Member",rejModal.memberName],["Amount",GHS(rejModal.principalRequested)],["Cycle",rejModal.cycle]].map(([l,v])=>(
-          <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:`1px solid ${c.border}`,fontSize:"13px"}}><span style={{color:c.muted}}>{l}</span><span style={{color:c.text,fontFamily:"monospace",fontWeight:"bold"}}>{v}</span></div>
-        ))}
-        <div style={{marginTop:"18px",marginBottom:"6px",fontSize:"11px",color:c.muted,textTransform:"uppercase",letterSpacing:"1px",fontFamily:"monospace"}}>Reason for Rejection</div>
-        <textarea value={rejReason} onChange={e=>setRejReason(e.target.value)} placeholder="Type your reason here..." style={{width:"100%",minHeight:"90px",background:"#0A0F1E",border:`1px solid ${c.red}`,borderRadius:"8px",padding:"10px",color:c.text,fontFamily:"Georgia,serif",fontSize:"13px",resize:"vertical",boxSizing:"border-box",outline:"none"}}/>
-        <button disabled={syncing} onClick={confirmReject} style={{background:syncing?c.muted:c.red,color:"#fff",border:"none",borderRadius:"8px",padding:"11px 20px",cursor:syncing?"not-allowed":"pointer",fontWeight:"bold",fontSize:"13px",width:"100%",marginTop:"16px",fontFamily:"Georgia,serif"}}>{syncing?"Saving...":"✕ CONFIRM REJECTION"}</button>
-        <button onClick={()=>setRejModal(null)} style={{background:"transparent",color:c.muted,border:`1px solid ${c.border}`,borderRadius:"8px",padding:"11px 20px",cursor:"pointer",fontSize:"13px",width:"100%",marginTop:"8px",fontFamily:"Georgia,serif"}}>Cancel</button>
-      </div>
-    </div>
-  );
 
   // ── ADMIN ─────────────────────────────────────────────────────────────────
   if(role==="admin") return (
@@ -575,7 +574,42 @@ function App(){
             <div><label style={LBL}>Submission Date</label><input style={INP} type="date" value={lForm.submissionDate} onChange={e=>setLForm(p=>({...p,submissionDate:e.target.value}))}/></div>
           </div>
           <button disabled={syncing} onClick={submitLoan} style={{background:syncing?c.muted:c.green,color:"#fff",border:"none",borderRadius:"8px",padding:"12px 24px",cursor:syncing?"not-allowed":"pointer",fontWeight:"bold",fontSize:"14px",width:"100%",fontFamily:"Georgia,serif"}}>{syncing?"Saving...":"✓ SUBMIT TO OWNER FOR APPROVAL"}</button>
-          <div style={{marginTop:"24px"}}><div style={SEC}>All Loan Applications</div><div style={CARD}><table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr><th style={TH}>ID</th><th style={TH}>Member</th><th style={TH}>Amount</th><th style={TH}>Cycle</th><th style={TH}>Status</th></tr></thead><tbody>{loans.map(l=><tr key={l.id}><td style={{...TD,fontFamily:"monospace",color:c.accent}}>{l.id}</td><td style={TD}>{l.memberName}</td><td style={{...TD,fontFamily:"monospace"}}>{GHS(l.principalRequested)}</td><td style={TD}>{l.cycle}</td><td style={TD}><span style={pill(l.status)}>{l.status}</span></td></tr>)}</tbody></table></div></div>
+          <div style={{marginTop:"24px"}}>
+            <div style={SEC}>All Loan Applications</div>
+            <div style={{...CARD,background:"rgba(59,130,246,0.05)",borderColor:c.blue,marginBottom:"16px"}}>
+              <div style={{fontSize:"12px",color:c.blue}}>📌 Once the Director approves a loan and you have physically handed the money to the customer, click <strong>MARK DISBURSED</strong> to activate the repayment schedule.</div>
+            </div>
+            <div style={CARD}>
+              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead><tr>
+                  <th style={TH}>ID</th><th style={TH}>Member</th><th style={TH}>Amount</th>
+                  <th style={TH}>Cycle</th><th style={TH}>Status</th><th style={TH}>Action</th>
+                </tr></thead>
+                <tbody>{loans.map(l=><tr key={l.id}>
+                  <td style={{...TD,fontFamily:"monospace",color:c.accent}}>{l.id}</td>
+                  <td style={TD}>{l.memberName}</td>
+                  <td style={{...TD,fontFamily:"monospace"}}>{GHS(l.principalRequested)}</td>
+                  <td style={TD}>{l.cycle}</td>
+                  <td style={TD}><span style={pill(l.status)}>{l.status}</span></td>
+                  <td style={TD}>
+                    {l.status==="APPROVED"&&
+                      <button
+                        disabled={syncing}
+                        onClick={()=>markDisbursed(l)}
+                        style={{background:syncing?c.muted:c.blue,color:"#fff",border:"none",borderRadius:"6px",padding:"6px 12px",cursor:syncing?"not-allowed":"pointer",fontWeight:"bold",fontSize:"11px",fontFamily:"Georgia,serif"}}
+                      >
+                        MARK DISBURSED
+                      </button>
+                    }
+                    {l.status==="PENDING"&&<span style={{color:c.accent,fontSize:"11px"}}>Awaiting Director approval</span>}
+                    {l.status==="ACTIVE"&&<span style={{color:c.green,fontSize:"11px"}}>✓ Active</span>}
+                    {l.status==="REJECTED"&&<span style={{color:c.red,fontSize:"11px"}}>✗ Rejected</span>}
+                    {l.status==="PAID_OFF"&&<span style={{color:c.muted,fontSize:"11px"}}>✓ Paid Off</span>}
+                  </td>
+                </tr>)}</tbody>
+              </table>
+            </div>
+          </div>
         </>}
 
         {aTab==="logPayment"&&<>
@@ -719,7 +753,7 @@ function App(){
         {tab==="loans"&&<>
           <div style={SEC}>All Loans</div>
           {rejLoans.length>0&&<div style={{...CARD,borderLeft:`4px solid ${c.red}`,background:"rgba(239,68,68,0.04)",marginBottom:"16px"}}><div style={{fontSize:"11px",color:c.red,letterSpacing:"2px",textTransform:"uppercase",fontFamily:"monospace",marginBottom:"10px"}}>Rejection History</div>{rejLoans.map(l=><div key={l.id} style={{padding:"10px 0",borderBottom:`1px solid ${c.border}`}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:"4px"}}><span style={{fontFamily:"monospace",fontSize:"12px",color:c.accent}}>{l.id}</span><span style={{fontFamily:"monospace",fontSize:"11px",color:c.muted}}>{l.memberName} · {l.rejectionDate}</span></div><div style={{fontSize:"12px",color:c.muted,fontStyle:"italic"}}>"{l.rejectionReason}"</div></div>)}</div>}
-          <div style={CARD}><table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr><th style={TH}>ID</th><th style={TH}>Member</th><th style={TH}>Requested</th><th style={TH}>Approved</th><th style={TH}>Total Debt</th><th style={TH}>Cycle</th><th style={TH}>Status</th><th style={TH}>Action</th></tr></thead><tbody>{loans.map(l=><tr key={l.id}><td style={{...TD,fontFamily:"monospace",color:c.accent}}>{l.id}</td><td style={TD}>{l.memberName}</td><td style={{...TD,fontFamily:"monospace",color:c.muted,fontSize:"11px"}}>{GHS(l.principalRequested)}</td><td style={{...TD,fontFamily:"monospace"}}>{l.principalApproved?GHS(l.principalApproved):"—"}</td><td style={{...TD,fontFamily:"monospace",color:c.green}}>{l.totalDebt?GHS(l.totalDebt):"—"}</td><td style={TD}>{l.cycle}</td><td style={TD}><span style={pill(l.status)}>{l.status}</span></td><td style={TD}>{l.status==="PENDING"&&<><button onClick={()=>openApprove(l)} style={{background:c.accent,color:"#000",border:"none",borderRadius:"6px",padding:"5px 10px",cursor:"pointer",fontWeight:"bold",fontSize:"11px",marginRight:"6px"}}>APPROVE</button><button onClick={()=>openReject(l)} style={{background:c.redSoft,color:c.red,border:`1px solid ${c.red}`,borderRadius:"6px",padding:"5px 10px",cursor:"pointer",fontWeight:"bold",fontSize:"11px"}}>REJECT</button></>}{l.status==="APPROVED"&&<button onClick={()=>markDisbursed(l)} style={{background:c.blue,color:"#fff",border:"none",borderRadius:"6px",padding:"5px 10px",cursor:"pointer",fontWeight:"bold",fontSize:"11px"}}>MARK DISBURSED</button>}{l.status==="REJECTED"&&<span style={{fontSize:"11px",color:c.muted,fontStyle:"italic"}}>"{l.rejectionReason?.slice(0,30)}..."</span>}{(l.status==="ACTIVE"||l.status==="PAID_OFF")&&<span style={{color:c.muted,fontSize:"11px"}}>—</span>}</td></tr>)}</tbody></table></div>
+          <div style={CARD}><table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr><th style={TH}>ID</th><th style={TH}>Member</th><th style={TH}>Requested</th><th style={TH}>Approved</th><th style={TH}>Total Debt</th><th style={TH}>Cycle</th><th style={TH}>Status</th><th style={TH}>Action</th></tr></thead><tbody>{loans.map(l=><tr key={l.id}><td style={{...TD,fontFamily:"monospace",color:c.accent}}>{l.id}</td><td style={TD}>{l.memberName}</td><td style={{...TD,fontFamily:"monospace",color:c.muted,fontSize:"11px"}}>{GHS(l.principalRequested)}</td><td style={{...TD,fontFamily:"monospace"}}>{l.principalApproved?GHS(l.principalApproved):"—"}</td><td style={{...TD,fontFamily:"monospace",color:c.green}}>{l.totalDebt?GHS(l.totalDebt):"—"}</td><td style={TD}>{l.cycle}</td><td style={TD}><span style={pill(l.status)}>{l.status}</span></td><td style={TD}>{l.status==="PENDING"&&<><button onClick={()=>openApprove(l)} style={{background:c.accent,color:"#000",border:"none",borderRadius:"6px",padding:"5px 10px",cursor:"pointer",fontWeight:"bold",fontSize:"11px",marginRight:"6px"}}>APPROVE</button><button onClick={()=>openReject(l)} style={{background:c.redSoft,color:c.red,border:`1px solid ${c.red}`,borderRadius:"6px",padding:"5px 10px",cursor:"pointer",fontWeight:"bold",fontSize:"11px"}}>REJECT</button></>}{l.status==="APPROVED"&&<span style={{color:c.muted,fontSize:"11px",fontStyle:"italic"}}>Awaiting disbursement by Admin</span>}{l.status==="REJECTED"&&<span style={{fontSize:"11px",color:c.muted,fontStyle:"italic"}}>"{l.rejectionReason?.slice(0,30)}..."</span>}{(l.status==="ACTIVE"||l.status==="PAID_OFF")&&<span style={{color:c.muted,fontSize:"11px"}}>—</span>}</td></tr>)}</tbody></table></div>
         </>}
 
         {tab==="members"&&<>
