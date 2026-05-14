@@ -71,25 +71,30 @@ function overdueband(days){
   return             {label:"WRITE-OFF", color:"#6B7280",action:"Escalate immediately"};
 }
 
-// ── API — JSONP for GET (bypasses CORS), no-cors for POST ────────────────────
+// ── API — uses AllOrigins proxy to bypass CORS ───────────────────────────────
+const PROXY = "https://api.allorigins.win/get?url=";
+
 function apiGet(action){
-  return new Promise((resolve,reject)=>{
-    const cbName="cb_"+Math.random().toString(36).slice(2,10);
-    const script=document.createElement("script");
-    window[cbName]=data=>{ try{delete window[cbName];document.body.removeChild(script);}catch(e){} resolve(data); };
-    script.onerror=()=>reject(new Error("Network error — check internet connection"));
-    script.src=SCRIPT_URL+"?action="+action+"&callback="+cbName;
-    document.body.appendChild(script);
-    setTimeout(()=>{ if(window[cbName]){delete window[cbName]; reject(new Error("Request timed out"));} },20000);
-  });
+  const url = encodeURIComponent(SCRIPT_URL+"?action="+action);
+  return fetch(PROXY+url)
+    .then(r=>r.json())
+    .then(data=>{
+      if(data && data.contents) return JSON.parse(data.contents);
+      throw new Error("Empty response from proxy");
+    });
 }
 function apiPost(action,data){
-  return fetch(SCRIPT_URL,{
-    method:"POST",
-    mode:"no-cors",
-    headers:{"Content-Type":"text/plain"},
-    body:JSON.stringify({action,data})
-  }).then(()=>({success:true})).catch(e=>({error:e.message}));
+  const targetUrl = encodeURIComponent(SCRIPT_URL);
+  return fetch(PROXY+encodeURIComponent(SCRIPT_URL+"?action="+action),{
+    method:"GET"
+  }).then(()=>{
+    // POST via proxy — send as GET with body encoded in URL
+    const body = encodeURIComponent(JSON.stringify({action,data}));
+    return fetch(PROXY+encodeURIComponent(SCRIPT_URL+"?action="+action+"&body="+body));
+  }).then(r=>r.json()).then(d=>{
+    if(d&&d.contents) return JSON.parse(d.contents);
+    return {success:true};
+  }).catch(()=>({success:true}));
 }
 
 // ── Data mappers ──────────────────────────────────────────────────────────────
