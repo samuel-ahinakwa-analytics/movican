@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Movican Micro Credit Enterprise</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{background:#0A0F1E;font-family:'Georgia','Times New Roman',serif;color:#F1F5F9;}
+  input,select,textarea{font-family:'Georgia','Times New Roman',serif;}
+  select option{background:#111827;color:#F1F5F9;}
+  optgroup{background:#0A0F1E;color:#64748B;font-style:normal;}
+  ::-webkit-scrollbar{width:6px;}
+  ::-webkit-scrollbar-track{background:#0A0F1E;}
+  ::-webkit-scrollbar-thumb{background:#1E2D45;border-radius:3px;}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxmw9p3x45554LvI8-VgAKSJ8-YpS3n3979N8OVr3wsx7E2nZlh_daj8jAZwhLQ-mD4KA/exec";
+
+const c = {
+  bg:"#0A0F1E",card:"#111827",cardBorder:"#1E2D45",
+  accent:"#F59E0B",accentSoft:"rgba(245,158,11,0.12)",
+  green:"#10B981",greenSoft:"rgba(16,185,129,0.12)",
+  red:"#EF4444",redSoft:"rgba(239,68,68,0.12)",
+  blue:"#3B82F6",blueSoft:"rgba(59,130,246,0.12)",
+  orange:"#F97316",purple:"#A855F7",
+  text:"#F1F5F9",muted:"#64748B",border:"#1E293B",
+};
+
+const { useState, useEffect, useMemo, useCallback } = React;
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+const TODAY = new Date();
+const todayStr = TODAY.toISOString().split("T")[0];
+const fmt = d => new Date(d).toISOString().split("T")[0];
+const addDays = (ds,n) => { const d=new Date(ds);d.setDate(d.getDate()+n);return fmt(d); };
+const addMonths = (ds,n) => { const d=new Date(ds);d.setMonth(d.getMonth()+n);return fmt(d); };
+const daysDiff = ds => { const due=new Date(ds);due.setHours(0,0,0,0);const now=new Date();now.setHours(0,0,0,0);return Math.floor((now-due)/86400000); };
+const GHS = n => `GHS ${(n||0).toLocaleString(undefined,{minimumFractionDigits:2})}`;
+const uid = () => Math.random().toString(36).slice(2,8).toUpperCase();
+
+function calcLoan(principal,cycle,instalments){
+  const months = cycle==="WEEKLY" ? instalments/4 : instalments;
+  const totalInterest = principal*0.05*months;
+  const totalDebt = principal+totalInterest;
+  const instalmentAmount = totalDebt/instalments;
+  return {totalInterest,totalDebt,instalmentAmount,months};
+}
+function genSchedule(loanId,approvalDate,cycle,instalments,instalmentAmount){
+  return Array.from({length:instalments},(_,i)=>({
+    id:`SCH-${loanId}-${i+1}`,loanId,instalment:i+1,
+    dueDate:cycle==="WEEKLY"?addDays(approvalDate,21+i*7):addMonths(approvalDate,2+i),
+    amountDue:instalmentAmount,amountPaid:0,remaining:instalmentAmount,status:"UNPAID",
+  }));
+}
+function overdueband(days){
+  if(days<=0)  return null;
+  if(days<=7)  return {label:"WATCH",    color:c.accent, action:"Monitor closely"};
+  if(days<=14) return {label:"CALL",     color:c.orange, action:"Call the customer now"};
+  if(days<=30) return {label:"ESCALATE", color:c.red,    action:"Visit / send written notice"};
+  if(days<=90) return {label:"CRITICAL", color:c.purple, action:"Guarantor / legal action"};
+  return             {label:"WRITE-OFF", color:"#6B7280",action:"Escalate immediately"};
+}
+
+// ── API ───────────────────────────────────────────────────────────────────────
+function apiGet(action){
+  return fetch(`${SCRIPT_URL}?action=${action}`).then(r=>r.json());
+}
+function apiPost(action,data){
+  return fetch(SCRIPT_URL,{method:"POST",body:JSON.stringify({action,data})}).then(r=>r.json());
+}
+
+// ── Data mappers ──────────────────────────────────────────────────────────────
+const mapMember = r => ({
+  id:r.member_id,fullName:r.full_name,phone:r.phone,gender:r.gender,
+  maritalStatus:r.marital_status,dob:r.dob,residentialAddress:r.residential_address,
+  homeTown:r.home_town,dependents:r.dependents,typeOfBusiness:r.type_of_business,
+  businessLocation:r.business_location,placeOfWorship:r.place_of_worship,
+  worshipLocation:r.worship_location,ghanaCard:r.ghana_card,
+  digitalAddress:r.digital_address,alternateMomo:r.alternate_momo,joinDate:r.join_date,
+  guarantor:{
+    name:r.guarantor_name,relationship:r.guarantor_relationship,gender:r.guarantor_gender,
+    maritalStatus:r.guarantor_marital_status,dob:r.guarantor_dob,phone:r.guarantor_phone,
+    residentialAddress:r.guarantor_residential_address,homeTown:r.guarantor_home_town,
+    dependents:r.guarantor_dependents,occupation:r.guarantor_occupation,
+    businessLocation:r.guarantor_business_location,placeOfWorship:r.guarantor_place_of_worship,
+    worshipLocation:r.guarantor_worship_location,
+  }
+});
+const mapLoan = r => ({
+  id:r.loan_id,memberId:r.member_id,memberName:r.member_name,
+  principalRequested:Number(r.principal_requested)||0,
+  principalApproved:r.principal_approved?Number(r.principal_approved):null,
+  cycle:r.cycle,instalments:Number(r.instalments)||0,
+  purposeOfLoan:r.purpose_of_loan,primarySourceOfRepayment:r.primary_source_of_repayment,
+  previousLoanAmount:r.previous_loan_amount,status:r.status,
+  submissionDate:r.submission_date,approvalDate:r.approval_date||null,
+  disbursedDate:r.disbursed_date||null,rejectionDate:r.rejection_date||null,
+  rejectionReason:r.rejection_reason||null,
+  totalInterest:r.total_interest?Number(r.total_interest):null,
+  totalDebt:r.total_debt?Number(r.total_debt):null,
+  instalmentAmount:r.instalment_amount?Number(r.instalment_amount):null,
+});
+const mapSchedule = r => ({
+  id:r.schedule_id,loanId:r.loan_id,instalment:Number(r.instalment),dueDate:r.due_date,
+  amountDue:Number(r.amount_due)||0,amountPaid:Number(r.amount_paid)||0,
+  remaining:Number(r.remaining)||0,status:r.status,
+});
+const mapPayment = r => ({
+  id:r.payment_id,loanId:r.loan_id,memberName:r.member_name,
+  amount:Number(r.amount)||0,method:r.method,date:r.date,receipt:r.receipt,senderPhone:r.sender_phone,
+});
+
+// ── Shared styles ─────────────────────────────────────────────────────────────
+const pill = status => {
+  const m={PENDING:{bg:c.accentSoft,col:c.accent},APPROVED:{bg:c.blueSoft,col:c.blue},ACTIVE:{bg:c.greenSoft,col:c.green},PAID_OFF:{bg:"rgba(100,116,139,0.2)",col:c.muted},REJECTED:{bg:c.redSoft,col:c.red},PAID:{bg:c.greenSoft,col:c.green},UNPAID:{bg:c.redSoft,col:c.red},PARTIAL:{bg:c.accentSoft,col:c.accent}};
+  const x=m[status]||m.PENDING;
+  return {background:x.bg,color:x.col,borderRadius:"12px",padding:"2px 9px",fontSize:"10px",fontFamily:"monospace",display:"inline-block"};
+};
+const riskBand = color => ({background:`${color}22`,color,border:`1px solid ${color}`,borderRadius:"12px",padding:"2px 9px",fontSize:"10px",fontFamily:"monospace",display:"inline-block",whiteSpace:"nowrap"});
+const SC = ac => ({background:c.card,border:`1px solid ${c.cardBorder}`,borderRadius:"12px",padding:"18px",borderLeft:`3px solid ${ac}`});
+const CARD = {background:c.card,border:`1px solid ${c.cardBorder}`,borderRadius:"12px",padding:"18px",marginBottom:"20px"};
+const TH = {textAlign:"left",padding:"9px 10px",fontSize:"10px",color:c.muted,textTransform:"uppercase",letterSpacing:"1px",borderBottom:`1px solid ${c.border}`,fontFamily:"monospace"};
+const TD = {padding:"11px 10px",fontSize:"12px",borderBottom:`1px solid ${c.border}`,color:c.text};
+const SEC = {fontSize:"11px",letterSpacing:"2px",textTransform:"uppercase",color:c.muted,marginBottom:"14px",fontFamily:"monospace"};
+const INP = {background:"#060D1A",border:`1px solid ${c.cardBorder}`,borderRadius:"6px",padding:"8px 10px",color:c.text,fontFamily:"Georgia,serif",fontSize:"13px",width:"100%",boxSizing:"border-box",outline:"none"};
+const LBL = {fontSize:"11px",color:c.muted,textTransform:"uppercase",letterSpacing:"1px",fontFamily:"monospace",display:"block",marginBottom:"4px"};
+const FCARD = {background:c.card,border:`1px solid ${c.cardBorder}`,borderRadius:"12px",padding:"20px",marginBottom:"16px"};
+const G2 = {display:"grid",gridTemplateColumns:"1fr 1fr",gap:"14px",marginBottom:"14px"};
+const G3 = {display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"14px",marginBottom:"14px"};
+
+const EM = {fullName:"",phone:"",gender:"",maritalStatus:"",dob:"",residentialAddress:"",homeTown:"",dependents:"",typeOfBusiness:"",businessLocation:"",placeOfWorship:"",worshipLocation:"",ghanaCard:"",digitalAddress:"",alternateMomo:"",joinDate:todayStr};
+const EG = {name:"",relationship:"",gender:"",maritalStatus:"",dob:"",phone:"",residentialAddress:"",homeTown:"",dependents:"",occupation:"",businessLocation:"",placeOfWorship:"",worshipLocation:""};
+const EL = {memberId:"",principalRequested:"",cycle:"WEEKLY",instalments:"",purposeOfLoan:"",primarySourceOfRepayment:"",previousLoanAmount:"N/A",submissionDate:todayStr};
+
+const Spinner = ({msg="Loading..."}) => (
+  <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"60px",gap:"16px"}}>
+    <div style={{width:"36px",height:"36px",border:`3px solid ${c.cardBorder}`,borderTop:`3px solid ${c.accent}`,borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+    <div style={{color:c.muted,fontSize:"13px",fontFamily:"monospace"}}>{msg}</div>
+  </div>
+);
+
+// ── Main App ──────────────────────────────────────────────────────────────────
+function App(){
+  const [role,setRole]   = useState(null);
+  const [tab,setTab]     = useState("dashboard");
+  const [aTab,setATab]   = useState("newMember");
+  const [loading,setLoading]   = useState(false);
+  const [syncing,setSyncing]   = useState(false);
+  const [dbOk,setDbOk]         = useState(false);
+  const [members,setMembers]   = useState([]);
+  const [loans,setLoans]       = useState([]);
+  const [schedules,setSchedules] = useState([]);
+  const [payments,setPayments] = useState([]);
+  const [appModal,setAppModal] = useState(null);
+  const [rejModal,setRejModal] = useState(null);
+  const [rejReason,setRejReason] = useState("");
+  const [mForm,setMForm]       = useState(EM);
+  const [gForm,setGForm]       = useState(EG);
+  const [lForm,setLForm]       = useState(EL);
+  const [pForm,setPForm]       = useState({scheduleId:"",amount:"",method:"CASH",receipt:"",senderPhone:""});
+  const [toast,setToast]       = useState(null);
+  const [search,setSearch]     = useState("");
+  const [expMember,setExpMember] = useState(null);
+  const [schedLoan,setSchedLoan] = useState("");
+
+  const showToast = (msg,color=c.green) => { setToast({msg,color}); setTimeout(()=>setToast(null),4000); };
+
+  const loadData = useCallback(async()=>{
+    setLoading(true);
+    try {
+      const data = await apiGet("getAll");
+      if(data.error) throw new Error(data.error);
+      setMembers((data.members||[]).map(mapMember));
+      setLoans((data.loans||[]).map(mapLoan));
+      setSchedules((data.schedules||[]).map(mapSchedule));
+      setPayments((data.payments||[]).map(mapPayment));
+      setDbOk(true);
+    } catch(e){ showToast("⚠ Cannot reach database: "+e.message,c.red); }
+    setLoading(false);
+  },[]);
+
+  useEffect(()=>{ loadData(); },[]);
+
+  // Derived
+  const overdueList = useMemo(()=>
+    schedules.filter(sc=>sc.status!=="PAID"&&daysDiff(sc.dueDate)>0)
+      .map(sc=>{const loan=loans.find(l=>l.id===sc.loanId);const days=daysDiff(sc.dueDate);return{...sc,loan,days,band:overdueband(days),memberName:loan?.memberName||"—"};})
+      .sort((a,b)=>b.days-a.days),
+  [schedules,loans]);
+
+  const PAR = portfolioAtRisk => overdueList.reduce((s,sc)=>s+sc.remaining,0);
+  const portfolioAtRisk = overdueList.reduce((s,sc)=>s+sc.remaining,0);
+  const pendingLoans = loans.filter(l=>l.status==="PENDING");
+  const activeLoans  = loans.filter(l=>l.status==="ACTIVE");
+  const rejLoans     = loans.filter(l=>l.status==="REJECTED");
+  const todayM       = members.filter(m=>m.joinDate===todayStr);
+  const todayOut     = loans.filter(l=>l.disbursedDate===todayStr).reduce((s,l)=>s+(l.principalApproved||0),0);
+  const todayIn      = payments.filter(p=>p.date===todayStr).reduce((s,p)=>s+p.amount,0);
+  const thisMonth    = TODAY.toISOString().slice(0,7);
+  const mOut         = loans.filter(l=>l.disbursedDate?.startsWith(thisMonth)).reduce((s,l)=>s+(l.principalApproved||0),0);
+  const mIn          = payments.filter(p=>p.date.startsWith(thisMonth)).reduce((s,p)=>s+p.amount,0);
+  const mInterest    = loans.filter(l=>l.approvalDate?.startsWith(thisMonth)&&l.totalInterest).reduce((s,l)=>s+l.totalInterest,0);
+  const portVal      = activeLoans.reduce((s,l)=>s+(l.totalDebt||0),0);
+  const activeSchs   = schedules.filter(sc=>{ const loan=loans.find(l=>l.id===sc.loanId); return loan?.status==="ACTIVE"&&sc.status!=="PAID"; });
+  const filteredM    = members.filter(m=>!search||m.fullName.toLowerCase().includes(search.toLowerCase())||m.phone.includes(search)||m.id.toLowerCase().includes(search.toLowerCase()));
+
+  // Approve
+  const openApprove = loan => { const calc=calcLoan(loan.principalRequested,loan.cycle,loan.instalments); setAppModal({loan,approvedAmount:loan.principalRequested,approvedInstalments:loan.instalments,...calc}); };
+  const updateApp = (field,value) => {
+    setAppModal(prev=>{
+      const amt=field==="approvedAmount"?Number(value)||0:Number(prev.approvedAmount)||0;
+      const ins=field==="approvedInstalments"?Number(value)||1:Number(prev.approvedInstalments)||1;
+      const calc=(amt>0&&ins>0)?calcLoan(amt,prev.loan.cycle,ins):{totalInterest:0,totalDebt:0,instalmentAmount:0,months:0};
+      return {...prev,[field]:value,...calc};
+    });
+  };
+  const confirmApprove = async() => {
+    setSyncing(true);
+    const {loan,approvedAmount,approvedInstalments,totalInterest,totalDebt,instalmentAmount}=appModal;
+    await apiPost("updateLoan",{id:loan.id,updates:{principal_approved:Number(approvedAmount),instalments:Number(approvedInstalments),status:"APPROVED",approval_date:todayStr,total_interest:totalInterest,total_debt:totalDebt,instalment_amount:instalmentAmount}});
+    setLoans(prev=>prev.map(l=>l.id===loan.id?{...l,status:"APPROVED",principalApproved:Number(approvedAmount),instalments:Number(approvedInstalments),approvalDate:todayStr,totalInterest,totalDebt,instalmentAmount}:l));
+    setAppModal(null); setSyncing(false);
+    showToast(`✓ Loan ${loan.id} approved and saved.`);
+  };
+
+  // Reject
+  const openReject = loan => { setRejModal(loan); setRejReason(""); };
+  const confirmReject = async() => {
+    if(!rejReason.trim()){showToast("Please enter a rejection reason.",c.red);return;}
+    setSyncing(true);
+    await apiPost("updateLoan",{id:rejModal.id,updates:{status:"REJECTED",rejection_date:todayStr,rejection_reason:rejReason.trim()}});
+    setLoans(prev=>prev.map(l=>l.id===rejModal.id?{...l,status:"REJECTED",rejectionDate:todayStr,rejectionReason:rejReason.trim()}:l));
+    setSyncing(false); setRejModal(null); setRejReason("");
+    showToast(`✗ Loan ${rejModal.id} rejected and saved.`,c.red);
+  };
+
+  // Disburse
+  const markDisbursed = async loan => {
+    setSyncing(true);
+    await apiPost("updateLoan",{id:loan.id,updates:{status:"ACTIVE",disbursed_date:todayStr}});
+    const newSch=genSchedule(loan.id,loan.approvalDate,loan.cycle,loan.instalments,loan.instalmentAmount);
+    await apiPost("saveSchedule",newSch);
+    setLoans(prev=>prev.map(l=>l.id===loan.id?{...l,status:"ACTIVE",disbursedDate:todayStr}:l));
+    setSchedules(prev=>[...prev,...newSch]);
+    setSyncing(false);
+    showToast(`✓ Loan ${loan.id} is now ACTIVE.`,c.blue);
+  };
+
+  // Submit member
+  const submitMember = async() => {
+    if(!mForm.fullName||!mForm.phone){showToast("Full name and phone required.",c.red);return;}
+    setSyncing(true);
+    const newM={...mForm,id:`M${String(members.length+1).padStart(3,"0")}`,guarantor:{...gForm}};
+    await apiPost("saveMember",newM);
+    setMembers(prev=>[...prev,newM]);
+    setMForm(EM); setGForm(EG); setSyncing(false);
+    showToast(`✓ ${newM.fullName} registered and saved.`);
+    setATab("newLoan");
+  };
+
+  // Submit loan
+  const submitLoan = async() => {
+    if(!lForm.memberId||!lForm.principalRequested||!lForm.instalments){showToast("Member, amount and instalments required.",c.red);return;}
+    const member=members.find(m=>m.id===lForm.memberId);
+    if(!member){showToast("Member not found.",c.red);return;}
+    setSyncing(true);
+    const newL={...lForm,id:`L${String(loans.length+1).padStart(3,"0")}`,memberName:member.fullName,principalRequested:Number(lForm.principalRequested),instalments:Number(lForm.instalments),principalApproved:null,status:"PENDING",approvalDate:null,disbursedDate:null,rejectionDate:null,rejectionReason:null,totalInterest:null,totalDebt:null,instalmentAmount:null};
+    await apiPost("saveLoan",newL);
+    setLoans(prev=>[...prev,newL]);
+    setLForm(EL); setSyncing(false);
+    showToast(`✓ Loan submitted to Owner for approval.`);
+  };
+
+  // Log payment
+  const submitPayment = async() => {
+    if(!pForm.scheduleId||!pForm.amount){showToast("Select instalment and enter amount.",c.red);return;}
+    const amt=Number(pForm.amount);
+    const sc=schedules.find(s=>s.id===pForm.scheduleId);
+    if(!sc) return;
+    const loan=loans.find(l=>l.id===sc.loanId);
+    setSyncing(true);
+    const newP={id:`P${uid()}`,loanId:sc.loanId,memberName:loan?.memberName||"",amount:amt,method:pForm.method,date:todayStr,receipt:pForm.receipt||`RCP-${uid()}`,senderPhone:pForm.senderPhone};
+    await apiPost("savePayment",newP);
+    setPayments(prev=>[...prev,newP]);
+    let remaining=amt;
+    const all=[...schedules];
+    const lSchs=all.filter(s=>s.loanId===sc.loanId&&s.status!=="PAID").sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate));
+    const ups=[];
+    lSchs.forEach(s=>{
+      if(remaining<=0) return;
+      const apply=Math.min(remaining,s.remaining);
+      remaining-=apply;
+      const idx=all.findIndex(x=>x.id===s.id);
+      if(idx>=0){
+        const np=all[idx].amountPaid+apply, nr=all[idx].remaining-apply;
+        const ns=nr<=0?"PAID":np>0?"PARTIAL":"UNPAID";
+        all[idx]={...all[idx],amountPaid:np,remaining:nr,status:ns};
+        ups.push({id:s.id,updates:{amount_paid:np,remaining:nr,status:ns}});
+      }
+    });
+    await Promise.all(ups.map(u=>apiPost("updateSchedule",u)));
+    setSchedules(all);
+    setPForm({scheduleId:"",amount:"",method:"CASH",receipt:"",senderPhone:""});
+    setSyncing(false);
+    showToast(`✓ ${GHS(amt)} logged for ${loan?.memberName}.`);
+  };
+
+  // Header
+  const Header = () => (
+    <div style={{background:"linear-gradient(135deg,#0A0F1E 0%,#0F1E3A 100%)",borderBottom:`1px solid ${c.cardBorder}`,padding:"16px 28px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:100,flexWrap:"wrap",gap:"8px"}}>
+      <div>
+        <div style={{fontSize:"18px",fontWeight:"bold",color:c.accent}}>◆ MOVICAN MICRO CREDIT</div>
+        <div style={{fontSize:"10px",color:c.muted,letterSpacing:"2px",textTransform:"uppercase"}}>Movican Micro Credit Enterprise</div>
+      </div>
+      <div style={{display:"flex",gap:"6px",alignItems:"center",flexWrap:"wrap"}}>
+        {syncing&&<span style={{background:c.blueSoft,color:c.blue,borderRadius:"20px",padding:"3px 10px",fontSize:"10px",fontFamily:"monospace"}}>⟳ SAVING...</span>}
+        {dbOk&&!syncing&&<span style={{background:c.greenSoft,color:c.green,borderRadius:"20px",padding:"3px 10px",fontSize:"10px",fontFamily:"monospace"}}>● LIVE</span>}
+        {!dbOk&&!loading&&<span style={{background:c.redSoft,color:c.red,borderRadius:"20px",padding:"3px 10px",fontSize:"10px",fontFamily:"monospace"}}>⚠ OFFLINE</span>}
+        {role==="owner"&&overdueList.length>0&&<span style={{background:c.redSoft,color:c.red,border:`1px solid ${c.red}`,borderRadius:"20px",padding:"3px 10px",fontSize:"10px",fontFamily:"monospace"}}>{overdueList.length} OVERDUE</span>}
+        {role==="owner"&&pendingLoans.length>0&&<span style={{background:c.accentSoft,color:c.accent,border:`1px solid ${c.accent}`,borderRadius:"20px",padding:"3px 10px",fontSize:"10px",fontFamily:"monospace"}}>{pendingLoans.length} PENDING</span>}
+        <span style={{background:role==="owner"?c.accentSoft:c.blueSoft,color:role==="owner"?c.accent:c.blue,border:`1px solid ${role==="owner"?c.accent:c.blue}`,borderRadius:"20px",padding:"3px 10px",fontSize:"10px",fontFamily:"monospace"}}>{role==="owner"?"👑 OWNER":"📋 ADMIN"}</span>
+        <button onClick={loadData} style={{background:"transparent",border:`1px solid ${c.border}`,borderRadius:"6px",padding:"3px 10px",color:c.muted,cursor:"pointer",fontSize:"12px"}} title="Refresh">↻</button>
+        <button onClick={()=>setRole(null)} style={{background:"transparent",border:`1px solid ${c.border}`,borderRadius:"6px",padding:"3px 10px",color:c.muted,cursor:"pointer",fontSize:"10px",fontFamily:"monospace"}}>SWITCH</button>
+      </div>
+    </div>
+  );
+
+  // Role selection
+  if(!role) return (
+    <div style={{minHeight:"100vh",background:c.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"20px"}}>
+      {loading&&<Spinner msg="Connecting to Google Sheets..."/>}
+      {!loading&&<>
+        <div style={{fontSize:"12px",color:c.accent,letterSpacing:"3px",textTransform:"uppercase",fontFamily:"monospace",marginBottom:"8px"}}>Welcome to</div>
+        <div style={{fontSize:"26px",fontWeight:"bold",color:c.text,marginBottom:"2px",textAlign:"center"}}>MOVICAN MICRO CREDIT</div>
+        <div style={{fontSize:"12px",color:c.muted,marginBottom:"8px",letterSpacing:"1px"}}>ENTERPRISE</div>
+        <div style={{fontSize:"11px",color:dbOk?c.green:c.red,fontFamily:"monospace",marginBottom:"32px"}}>{dbOk?"● Connected to Google Sheets":"⚠ Database connection issue"}</div>
+        <div style={{display:"flex",gap:"16px",flexWrap:"wrap",justifyContent:"center"}}>
+          <button onClick={()=>{setRole("owner");setTab("dashboard");}} style={{background:c.accentSoft,border:`2px solid ${c.accent}`,borderRadius:"12px",padding:"28px 40px",cursor:"pointer",color:c.accent,fontFamily:"Georgia,serif",fontSize:"16px",fontWeight:"bold",minWidth:"200px",animation:"fadeIn 0.3s ease"}}>
+            <div style={{fontSize:"32px",marginBottom:"8px"}}>👑</div>
+            <div>Owner</div>
+            <div style={{fontSize:"11px",color:c.muted,marginTop:"4px",fontWeight:"normal"}}>Full dashboard + approvals</div>
+          </button>
+          <button onClick={()=>{setRole("admin");setATab("newMember");}} style={{background:c.blueSoft,border:`2px solid ${c.blue}`,borderRadius:"12px",padding:"28px 40px",cursor:"pointer",color:c.blue,fontFamily:"Georgia,serif",fontSize:"16px",fontWeight:"bold",minWidth:"200px",animation:"fadeIn 0.3s ease"}}>
+            <div style={{fontSize:"32px",marginBottom:"8px"}}>📋</div>
+            <div>Administrator</div>
+            <div style={{fontSize:"11px",color:c.muted,marginTop:"4px",fontWeight:"normal"}}>Data entry + payments</div>
+          </button>
+        </div>
+      </>}
+    </div>
+  );
+
+  // Modals
+  const ApproveModal = () => !appModal ? null : (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:"20px"}}>
+      <div style={{background:c.card,border:`1px solid ${c.accent}`,borderRadius:"16px",padding:"28px",width:"520px",maxWidth:"100%",maxHeight:"90vh",overflowY:"auto"}}>
+        <div style={{fontSize:"17px",fontWeight:"bold",color:c.accent,marginBottom:"18px"}}>⚡ Authorise Loan — {appModal.loan.id}</div>
+        {[["Member",appModal.loan.memberName,c.text],["Requested",GHS(appModal.loan.principalRequested),c.muted],["Cycle",appModal.loan.cycle,c.text],["Purpose",appModal.loan.purposeOfLoan||"—",c.muted]].map(([l,v,col])=>(
+          <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:`1px solid ${c.border}`,fontSize:"13px"}}><span style={{color:c.muted}}>{l}</span><span style={{color:col,fontFamily:"monospace",fontWeight:"bold"}}>{v}</span></div>
+        ))}
+        <div style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:`1px solid ${c.border}`,fontSize:"13px",alignItems:"center"}}>
+          <span style={{color:c.muted}}>Amount to Approve <span style={{color:c.accent}}>(editable)</span></span>
+          <input style={{background:"#0A0F1E",border:`1px solid ${c.accent}`,borderRadius:"6px",padding:"5px 9px",color:c.text,fontFamily:"monospace",fontSize:"13px",width:"130px",textAlign:"right"}} type="number" value={appModal.approvedAmount} onChange={e=>updateApp("approvedAmount",e.target.value)}/>
+        </div>
+        <div style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:`1px solid ${c.border}`,fontSize:"13px",alignItems:"center"}}>
+          <span style={{color:c.muted}}>No. of Instalments <span style={{color:c.accent}}>(editable)</span></span>
+          <input style={{background:"#0A0F1E",border:`1px solid ${c.accent}`,borderRadius:"6px",padding:"5px 9px",color:c.text,fontFamily:"monospace",fontSize:"13px",width:"130px",textAlign:"right"}} type="number" min="1" value={appModal.approvedInstalments} onChange={e=>updateApp("approvedInstalments",e.target.value)}/>
+        </div>
+        <div style={{margin:"12px 0 4px",padding:"12px",background:c.accentSoft,borderRadius:"8px"}}>
+          <div style={{fontSize:"10px",color:c.muted,letterSpacing:"1px",marginBottom:"8px",textTransform:"uppercase"}}>Auto-Calculated</div>
+          {[["Duration",`${(appModal.months||0).toFixed(2)} months`,c.text],["Interest (5%/month)",GHS(appModal.totalInterest),c.accent],["Total Debt",GHS(appModal.totalDebt),c.green],["Per Instalment",GHS(appModal.instalmentAmount),c.text]].map(([l,v,col])=>(
+            <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${c.border}`,fontSize:"13px"}}><span style={{color:c.muted}}>{l}</span><span style={{color:col,fontFamily:"monospace",fontWeight:"bold"}}>{v}</span></div>
+          ))}
+        </div>
+        <div style={{marginTop:"10px",padding:"8px 12px",background:c.redSoft,borderRadius:"8px",fontSize:"11px",color:c.red}}>⚠ Once authorised, this record is permanently locked.</div>
+        <button disabled={syncing} onClick={confirmApprove} style={{background:syncing?c.muted:c.green,color:"#fff",border:"none",borderRadius:"8px",padding:"11px 20px",cursor:syncing?"not-allowed":"pointer",fontWeight:"bold",fontSize:"13px",width:"100%",marginTop:"18px",fontFamily:"Georgia,serif"}}>{syncing?"Saving...":"✓ AUTHORISE LOAN"}</button>
+        <button onClick={()=>setAppModal(null)} style={{background:"transparent",color:c.muted,border:`1px solid ${c.border}`,borderRadius:"8px",padding:"11px 20px",cursor:"pointer",fontSize:"13px",width:"100%",marginTop:"8px",fontFamily:"Georgia,serif"}}>Cancel</button>
+      </div>
+    </div>
+  );
+
+  const RejectModal = () => !rejModal ? null : (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:"20px"}}>
+      <div style={{background:c.card,border:`1px solid ${c.red}`,borderRadius:"16px",padding:"28px",width:"480px",maxWidth:"100%"}}>
+        <div style={{fontSize:"17px",fontWeight:"bold",color:c.red,marginBottom:"6px"}}>✕ Reject Loan — {rejModal.id}</div>
+        <div style={{fontSize:"12px",color:c.muted,marginBottom:"20px"}}>Member can reapply. Reason saved permanently.</div>
+        {[["Member",rejModal.memberName],["Amount",GHS(rejModal.principalRequested)],["Cycle",rejModal.cycle]].map(([l,v])=>(
+          <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:`1px solid ${c.border}`,fontSize:"13px"}}><span style={{color:c.muted}}>{l}</span><span style={{color:c.text,fontFamily:"monospace",fontWeight:"bold"}}>{v}</span></div>
+        ))}
+        <div style={{marginTop:"18px",marginBottom:"6px",fontSize:"11px",color:c.muted,textTransform:"uppercase",letterSpacing:"1px",fontFamily:"monospace"}}>Reason for Rejection</div>
+        <textarea value={rejReason} onChange={e=>setRejReason(e.target.value)} placeholder="Type your reason here..." style={{width:"100%",minHeight:"90px",background:"#0A0F1E",border:`1px solid ${c.red}`,borderRadius:"8px",padding:"10px",color:c.text,fontFamily:"Georgia,serif",fontSize:"13px",resize:"vertical",boxSizing:"border-box",outline:"none"}}/>
+        <button disabled={syncing} onClick={confirmReject} style={{background:syncing?c.muted:c.red,color:"#fff",border:"none",borderRadius:"8px",padding:"11px 20px",cursor:syncing?"not-allowed":"pointer",fontWeight:"bold",fontSize:"13px",width:"100%",marginTop:"16px",fontFamily:"Georgia,serif"}}>{syncing?"Saving...":"✕ CONFIRM REJECTION"}</button>
+        <button onClick={()=>setRejModal(null)} style={{background:"transparent",color:c.muted,border:`1px solid ${c.border}`,borderRadius:"8px",padding:"11px 20px",cursor:"pointer",fontSize:"13px",width:"100%",marginTop:"8px",fontFamily:"Georgia,serif"}}>Cancel</button>
+      </div>
+    </div>
+  );
+
+  // ── ADMIN ─────────────────────────────────────────────────────────────────
+  if(role==="admin") return (
+    <div style={{minHeight:"100vh",background:c.bg}}>
+      {toast&&<div style={{position:"fixed",top:18,right:18,zIndex:2000,background:toast.color,color:"#fff",padding:"11px 18px",borderRadius:"8px",fontSize:"12px",fontFamily:"monospace",boxShadow:"0 4px 20px rgba(0,0,0,0.5)",animation:"fadeIn 0.2s ease"}}>{toast.msg}</div>}
+      <Header/>
+      <div style={{display:"flex",gap:"2px",padding:"14px 28px 0",borderBottom:`1px solid ${c.border}`,overflowX:"auto"}}>
+        {[["newMember","📋 New Member"],["newLoan","📄 Loan Application"],["logPayment","💰 Log Payment"],["schedule","📅 Schedules"]].map(([k,l])=>(
+          <button key={k} onClick={()=>setATab(k)} style={{padding:"9px 14px",border:"none",background:aTab===k?c.blueSoft:"transparent",color:aTab===k?c.blue:c.muted,borderBottom:aTab===k?`2px solid ${c.blue}`:"2px solid transparent",cursor:"pointer",fontSize:"12px",fontFamily:"Georgia,serif",whiteSpace:"nowrap"}}>{l}</button>
+        ))}
+      </div>
+      {loading&&<Spinner msg="Loading from Google Sheets..."/>}
+      {!loading&&<div style={{padding:"24px 28px",maxWidth:"900px"}}>
+
+        {aTab==="newMember"&&<>
+          <div style={SEC}>Register New Member</div>
+          <div style={{...CARD,background:"rgba(59,130,246,0.05)",borderColor:c.blue,marginBottom:"16px"}}><div style={{fontSize:"12px",color:c.blue}}>📌 Fill in the customer and guarantor details from the paper form. Once registered, the member is saved permanently to Google Sheets and appears in the Loan Application dropdown.</div></div>
+          <div style={FCARD}>
+            <div style={{...SEC,color:c.blue}}>Customer Information</div>
+            <div style={G2}><div><label style={LBL}>Full Legal Name *</label><input style={INP} value={mForm.fullName} onChange={e=>setMForm(p=>({...p,fullName:e.target.value}))} placeholder="As on Ghana Card"/></div><div><label style={LBL}>Telephone *</label><input style={INP} value={mForm.phone} onChange={e=>setMForm(p=>({...p,phone:e.target.value}))}/></div></div>
+            <div style={G3}><div><label style={LBL}>Gender</label><select style={INP} value={mForm.gender} onChange={e=>setMForm(p=>({...p,gender:e.target.value}))}><option value="">Select</option><option>Male</option><option>Female</option></select></div><div><label style={LBL}>Marital Status</label><select style={INP} value={mForm.maritalStatus} onChange={e=>setMForm(p=>({...p,maritalStatus:e.target.value}))}><option value="">Select</option><option>Single</option><option>Married</option><option>Divorced</option><option>Widowed</option></select></div><div><label style={LBL}>Date of Birth</label><input style={INP} type="date" value={mForm.dob} onChange={e=>setMForm(p=>({...p,dob:e.target.value}))}/></div></div>
+            <div style={G2}><div><label style={LBL}>Residential Address</label><input style={INP} value={mForm.residentialAddress} onChange={e=>setMForm(p=>({...p,residentialAddress:e.target.value}))}/></div><div><label style={LBL}>Home Town</label><input style={INP} value={mForm.homeTown} onChange={e=>setMForm(p=>({...p,homeTown:e.target.value}))}/></div></div>
+            <div style={G3}><div><label style={LBL}>Dependents</label><input style={INP} type="number" value={mForm.dependents} onChange={e=>setMForm(p=>({...p,dependents:e.target.value}))}/></div><div><label style={LBL}>Ghana Card No.</label><input style={INP} value={mForm.ghanaCard} onChange={e=>setMForm(p=>({...p,ghanaCard:e.target.value}))} placeholder="GHA-XXXXXXXXX-X"/></div><div><label style={LBL}>Digital Address</label><input style={INP} value={mForm.digitalAddress} onChange={e=>setMForm(p=>({...p,digitalAddress:e.target.value}))}/></div></div>
+            <div style={G2}><div><label style={LBL}>Type of Business</label><input style={INP} value={mForm.typeOfBusiness} onChange={e=>setMForm(p=>({...p,typeOfBusiness:e.target.value}))}/></div><div><label style={LBL}>Business Location</label><input style={INP} value={mForm.businessLocation} onChange={e=>setMForm(p=>({...p,businessLocation:e.target.value}))}/></div></div>
+            <div style={G2}><div><label style={LBL}>Place of Worship</label><input style={INP} value={mForm.placeOfWorship} onChange={e=>setMForm(p=>({...p,placeOfWorship:e.target.value}))}/></div><div><label style={LBL}>Worship Location</label><input style={INP} value={mForm.worshipLocation} onChange={e=>setMForm(p=>({...p,worshipLocation:e.target.value}))}/></div></div>
+            <div><label style={LBL}>Alternate MoMo Number</label><input style={INP} value={mForm.alternateMomo} onChange={e=>setMForm(p=>({...p,alternateMomo:e.target.value}))} placeholder="For third-party payments"/></div>
+          </div>
+          <div style={FCARD}>
+            <div style={{...SEC,color:c.orange}}>Guarantor Information</div>
+            <div style={G2}><div><label style={LBL}>Guarantor Full Name</label><input style={INP} value={gForm.name} onChange={e=>setGForm(p=>({...p,name:e.target.value}))}/></div><div><label style={LBL}>Relationship</label><input style={INP} value={gForm.relationship} onChange={e=>setGForm(p=>({...p,relationship:e.target.value}))} placeholder="e.g. Friend, Spouse"/></div></div>
+            <div style={G3}><div><label style={LBL}>Gender</label><select style={INP} value={gForm.gender} onChange={e=>setGForm(p=>({...p,gender:e.target.value}))}><option value="">Select</option><option>Male</option><option>Female</option></select></div><div><label style={LBL}>Marital Status</label><select style={INP} value={gForm.maritalStatus} onChange={e=>setGForm(p=>({...p,maritalStatus:e.target.value}))}><option value="">Select</option><option>Single</option><option>Married</option><option>Divorced</option><option>Widowed</option></select></div><div><label style={LBL}>Date of Birth</label><input style={INP} type="date" value={gForm.dob} onChange={e=>setGForm(p=>({...p,dob:e.target.value}))}/></div></div>
+            <div style={G2}><div><label style={LBL}>Phone</label><input style={INP} value={gForm.phone} onChange={e=>setGForm(p=>({...p,phone:e.target.value}))}/></div><div><label style={LBL}>Dependents</label><input style={INP} type="number" value={gForm.dependents} onChange={e=>setGForm(p=>({...p,dependents:e.target.value}))}/></div></div>
+            <div style={G2}><div><label style={LBL}>Residential Address</label><input style={INP} value={gForm.residentialAddress} onChange={e=>setGForm(p=>({...p,residentialAddress:e.target.value}))}/></div><div><label style={LBL}>Home Town</label><input style={INP} value={gForm.homeTown} onChange={e=>setGForm(p=>({...p,homeTown:e.target.value}))}/></div></div>
+            <div style={G2}><div><label style={LBL}>Occupation / Business</label><input style={INP} value={gForm.occupation} onChange={e=>setGForm(p=>({...p,occupation:e.target.value}))}/></div><div><label style={LBL}>Business Location</label><input style={INP} value={gForm.businessLocation} onChange={e=>setGForm(p=>({...p,businessLocation:e.target.value}))}/></div></div>
+            <div style={G2}><div><label style={LBL}>Place of Worship</label><input style={INP} value={gForm.placeOfWorship} onChange={e=>setGForm(p=>({...p,placeOfWorship:e.target.value}))}/></div><div><label style={LBL}>Worship Location</label><input style={INP} value={gForm.worshipLocation} onChange={e=>setGForm(p=>({...p,worshipLocation:e.target.value}))}/></div></div>
+          </div>
+          <button disabled={syncing} onClick={submitMember} style={{background:syncing?c.muted:c.blue,color:"#fff",border:"none",borderRadius:"8px",padding:"12px 24px",cursor:syncing?"not-allowed":"pointer",fontWeight:"bold",fontSize:"14px",width:"100%",fontFamily:"Georgia,serif"}}>{syncing?"Saving to Google Sheets...":"✓ REGISTER MEMBER"}</button>
+        </>}
+
+        {aTab==="newLoan"&&<>
+          <div style={SEC}>Loan Application Form</div>
+          <div style={{...CARD,background:"rgba(16,185,129,0.05)",borderColor:c.green,marginBottom:"16px"}}><div style={{fontSize:"12px",color:c.green}}>📌 Once submitted, the loan appears on the Owner's dashboard as PENDING and is saved to Google Sheets immediately.</div></div>
+          <div style={FCARD}>
+            <div style={{marginBottom:"14px"}}><label style={LBL}>Select Member *</label>
+              <select style={INP} value={lForm.memberId} onChange={e=>setLForm(p=>({...p,memberId:e.target.value}))}>
+                <option value="">-- Select registered member --</option>
+                {members.map(m=>{const hasActive=loans.some(l=>l.memberId===m.id&&l.status==="ACTIVE");return <option key={m.id} value={m.id}>{m.id} — {m.fullName} ({m.phone}){hasActive?" ⚠ HAS ACTIVE LOAN":""}</option>;})}
+              </select>
+            </div>
+            {lForm.memberId&&(()=>{
+              const mLoans=loans.filter(l=>l.memberId===lForm.memberId);
+              const rejected=mLoans.filter(l=>l.status==="REJECTED");
+              const active=mLoans.filter(l=>l.status==="ACTIVE");
+              if(!rejected.length&&!active.length) return null;
+              return <div style={{padding:"12px",background:"rgba(239,68,68,0.08)",border:`1px solid ${c.red}`,borderRadius:"8px",marginBottom:"14px"}}>
+                <div style={{fontSize:"11px",color:c.red,fontWeight:"bold",marginBottom:"6px"}}>⚠ LOAN HISTORY ALERT</div>
+                {active.map(l=><div key={l.id} style={{fontSize:"12px",color:c.orange,marginBottom:"4px"}}>Active loan: {l.id} — {GHS(l.totalDebt)} — {l.cycle}</div>)}
+                {rejected.map(l=><div key={l.id} style={{fontSize:"12px",color:c.red,marginBottom:"4px"}}>Previously rejected: {l.id} on {l.rejectionDate} — "{l.rejectionReason}"</div>)}
+              </div>;
+            })()}
+            <div style={G2}><div><label style={LBL}>Loan Amount (GHS) *</label><input style={INP} type="number" value={lForm.principalRequested} onChange={e=>setLForm(p=>({...p,principalRequested:e.target.value}))}/></div><div><label style={LBL}>Previous Loan Amount</label><input style={INP} value={lForm.previousLoanAmount} onChange={e=>setLForm(p=>({...p,previousLoanAmount:e.target.value}))}/></div></div>
+            <div style={G2}><div><label style={LBL}>Repayment Cycle *</label><select style={INP} value={lForm.cycle} onChange={e=>setLForm(p=>({...p,cycle:e.target.value}))}><option value="WEEKLY">Weekly</option><option value="MONTHLY">Monthly</option></select></div><div><label style={LBL}>Number of Instalments *</label><input style={INP} type="number" min="1" value={lForm.instalments} onChange={e=>setLForm(p=>({...p,instalments:e.target.value}))}/></div></div>
+            {lForm.principalRequested&&lForm.instalments&&Number(lForm.instalments)>0&&(()=>{
+              const calc=calcLoan(Number(lForm.principalRequested),lForm.cycle,Number(lForm.instalments));
+              return <div style={{padding:"12px",background:c.greenSoft,borderRadius:"8px",marginBottom:"14px",display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"10px"}}>
+                <div><div style={{fontSize:"10px",color:c.muted}}>Interest</div><div style={{fontFamily:"monospace",color:c.accent,fontWeight:"bold"}}>{GHS(calc.totalInterest)}</div></div>
+                <div><div style={{fontSize:"10px",color:c.muted}}>Total Debt</div><div style={{fontFamily:"monospace",color:c.green,fontWeight:"bold"}}>{GHS(calc.totalDebt)}</div></div>
+                <div><div style={{fontSize:"10px",color:c.muted}}>Per Instalment</div><div style={{fontFamily:"monospace",color:c.text,fontWeight:"bold"}}>{GHS(calc.instalmentAmount)}</div></div>
+              </div>;
+            })()}
+            <div style={G2}><div><label style={LBL}>Purpose of Loan</label><input style={INP} value={lForm.purposeOfLoan} onChange={e=>setLForm(p=>({...p,purposeOfLoan:e.target.value}))}/></div><div><label style={LBL}>Source of Repayment</label><input style={INP} value={lForm.primarySourceOfRepayment} onChange={e=>setLForm(p=>({...p,primarySourceOfRepayment:e.target.value}))}/></div></div>
+            <div><label style={LBL}>Submission Date</label><input style={INP} type="date" value={lForm.submissionDate} onChange={e=>setLForm(p=>({...p,submissionDate:e.target.value}))}/></div>
+          </div>
+          <button disabled={syncing} onClick={submitLoan} style={{background:syncing?c.muted:c.green,color:"#fff",border:"none",borderRadius:"8px",padding:"12px 24px",cursor:syncing?"not-allowed":"pointer",fontWeight:"bold",fontSize:"14px",width:"100%",fontFamily:"Georgia,serif"}}>{syncing?"Saving...":"✓ SUBMIT TO OWNER FOR APPROVAL"}</button>
+          <div style={{marginTop:"24px"}}><div style={SEC}>All Loan Applications</div><div style={CARD}><table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr><th style={TH}>ID</th><th style={TH}>Member</th><th style={TH}>Amount</th><th style={TH}>Cycle</th><th style={TH}>Status</th></tr></thead><tbody>{loans.map(l=><tr key={l.id}><td style={{...TD,fontFamily:"monospace",color:c.accent}}>{l.id}</td><td style={TD}>{l.memberName}</td><td style={{...TD,fontFamily:"monospace"}}>{GHS(l.principalRequested)}</td><td style={TD}>{l.cycle}</td><td style={TD}><span style={pill(l.status)}>{l.status}</span></td></tr>)}</tbody></table></div></div>
+        </>}
+
+        {aTab==="logPayment"&&<>
+          <div style={SEC}>Log Incoming Payment</div>
+          <div style={{...CARD,background:"rgba(245,158,11,0.05)",borderColor:c.accent,marginBottom:"16px"}}><div style={{fontSize:"12px",color:c.accent}}>📌 Select the member and instalment. Payment saves to Google Sheets and waterfall is applied automatically — oldest unpaid instalment cleared first.</div></div>
+          <div style={FCARD}>
+            <div style={{marginBottom:"14px"}}><label style={LBL}>Select Member Instalment *</label>
+              <select style={INP} value={pForm.scheduleId} onChange={e=>setPForm(p=>({...p,scheduleId:e.target.value}))}>
+                <option value="">-- Choose member and instalment --</option>
+                {loans.filter(l=>l.status==="ACTIVE").map(loan=>{
+                  const lSchs=activeSchs.filter(sc=>sc.loanId===loan.id);
+                  return lSchs.length>0?<optgroup key={loan.id} label={`${loan.memberName} (${loan.id} · ${loan.cycle})`}>{lSchs.map(sc=><option key={sc.id} value={sc.id}>Instalment {sc.instalment} — Due: {sc.dueDate} — Owed: GHS {sc.remaining.toFixed(2)}</option>)}</optgroup>:null;
+                })}
+              </select>
+            </div>
+            {pForm.scheduleId&&(()=>{
+              const sc=schedules.find(s=>s.id===pForm.scheduleId);
+              const loan=sc?loans.find(l=>l.id===sc.loanId):null;
+              if(!sc||!loan) return null;
+              const tp=schedules.filter(s=>s.loanId===loan.id).reduce((sum,s)=>sum+s.amountPaid,0);
+              const tr=schedules.filter(s=>s.loanId===loan.id).reduce((sum,s)=>sum+s.remaining,0);
+              return <div style={{padding:"12px",background:c.blueSoft,borderRadius:"8px",marginBottom:"14px",border:`1px solid ${c.blue}`}}>
+                <div style={{fontSize:"12px",fontWeight:"bold",color:c.blue,marginBottom:"8px"}}>📋 {loan.memberName}</div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"8px",fontSize:"12px"}}>
+                  <div><div style={{color:c.muted,fontSize:"10px"}}>Total Loan</div><div style={{fontFamily:"monospace"}}>{GHS(loan.totalDebt)}</div></div>
+                  <div><div style={{color:c.muted,fontSize:"10px"}}>Total Paid</div><div style={{fontFamily:"monospace",color:c.green}}>{GHS(tp)}</div></div>
+                  <div><div style={{color:c.muted,fontSize:"10px"}}>Still Owed</div><div style={{fontFamily:"monospace",color:c.red}}>{GHS(tr)}</div></div>
+                </div>
+              </div>;
+            })()}
+            <div style={G2}><div><label style={LBL}>Amount Paid (GHS) *</label><input style={INP} type="number" value={pForm.amount} onChange={e=>setPForm(p=>({...p,amount:e.target.value}))}/></div><div><label style={LBL}>Payment Method</label><select style={INP} value={pForm.method} onChange={e=>setPForm(p=>({...p,method:e.target.value}))}><option value="CASH">Cash</option><option value="MOMO">Mobile Money (MoMo)</option></select></div></div>
+            <div style={G2}><div><label style={LBL}>Receipt / Transaction ID</label><input style={INP} value={pForm.receipt} onChange={e=>setPForm(p=>({...p,receipt:e.target.value}))}/></div><div><label style={LBL}>Sender Phone (if different)</label><input style={INP} value={pForm.senderPhone} onChange={e=>setPForm(p=>({...p,senderPhone:e.target.value}))}/></div></div>
+          </div>
+          <button disabled={syncing} onClick={submitPayment} style={{background:syncing?c.muted:c.accent,color:"#000",border:"none",borderRadius:"8px",padding:"12px 24px",cursor:syncing?"not-allowed":"pointer",fontWeight:"bold",fontSize:"14px",width:"100%",fontFamily:"Georgia,serif"}}>{syncing?"Saving...":"✓ LOG PAYMENT"}</button>
+          <div style={{marginTop:"24px"}}><div style={SEC}>Recent Payments</div><div style={CARD}><table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr><th style={TH}>Receipt</th><th style={TH}>Member</th><th style={TH}>Amount</th><th style={TH}>Method</th><th style={TH}>Date</th></tr></thead><tbody>{[...payments].reverse().slice(0,20).map(p=><tr key={p.id}><td style={{...TD,fontFamily:"monospace",color:c.accent}}>{p.receipt}</td><td style={TD}>{p.memberName}</td><td style={{...TD,fontFamily:"monospace",color:c.green}}>{GHS(p.amount)}</td><td style={TD}><span style={{background:p.method==="MOMO"?c.blueSoft:c.accentSoft,color:p.method==="MOMO"?c.blue:c.accent,padding:"2px 8px",borderRadius:"10px",fontSize:"10px",fontFamily:"monospace"}}>{p.method}</span></td><td style={{...TD,fontFamily:"monospace",fontSize:"11px"}}>{p.date}</td></tr>)}</tbody></table></div></div>
+        </>}
+
+        {aTab==="schedule"&&(()=>{
+          const activeLList=loans.filter(l=>l.status==="ACTIVE");
+          const selLoan=activeLList.find(l=>l.id===schedLoan)||null;
+          const lSchs=selLoan?schedules.filter(sc=>sc.loanId===selLoan.id):[];
+          const tp=lSchs.reduce((s,sc)=>s+sc.amountPaid,0);
+          const tr=lSchs.reduce((s,sc)=>s+sc.remaining,0);
+          const prog=selLoan&&selLoan.totalDebt>0?(tp/selLoan.totalDebt)*100:0;
+          return <>
+            <div style={SEC}>View Repayment Schedule</div>
+            <div style={FCARD}>
+              <label style={LBL}>Select Member</label>
+              <select style={{...INP,fontSize:"14px"}} value={schedLoan} onChange={e=>setSchedLoan(e.target.value)}>
+                <option value="">-- Choose a member --</option>
+                {activeLList.map(loan=>{
+                  const ls=schedules.filter(sc=>sc.loanId===loan.id);
+                  const paid=ls.filter(sc=>sc.status==="PAID").length;
+                  const ov=ls.filter(sc=>sc.status!=="PAID"&&daysDiff(sc.dueDate)>0).length;
+                  return <option key={loan.id} value={loan.id}>{loan.memberName} — {loan.cycle} — {paid}/{loan.instalments} paid{ov>0?` — ⚠ ${ov} overdue`:""}</option>;
+                })}
+              </select>
+            </div>
+            {!selLoan&&<div style={{...CARD,textAlign:"center",padding:"40px",color:c.muted}}><div style={{fontSize:"32px",marginBottom:"12px"}}>📅</div><div>Select a member to view their schedule</div><div style={{fontSize:"12px",marginTop:"6px"}}>{activeLList.length} active loan{activeLList.length!==1?"s":""}</div></div>}
+            {selLoan&&<div style={CARD}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"16px",flexWrap:"wrap",gap:"10px"}}>
+                <div><div style={{fontWeight:"bold",fontSize:"16px",color:c.text}}>{selLoan.memberName}</div><div style={{fontFamily:"monospace",fontSize:"11px",color:c.muted}}>{selLoan.id} · {selLoan.cycle} · {selLoan.instalments} instalments · Approved: {selLoan.approvalDate}</div></div>
+                <div style={{display:"flex",gap:"16px",flexWrap:"wrap"}}>
+                  <div style={{textAlign:"right"}}><div style={{fontSize:"10px",color:c.muted}}>Total</div><div style={{fontFamily:"monospace",fontWeight:"bold"}}>{GHS(selLoan.totalDebt)}</div></div>
+                  <div style={{textAlign:"right"}}><div style={{fontSize:"10px",color:c.muted}}>Paid</div><div style={{fontFamily:"monospace",color:c.green,fontWeight:"bold"}}>{GHS(tp)}</div></div>
+                  <div style={{textAlign:"right"}}><div style={{fontSize:"10px",color:c.muted}}>Owed</div><div style={{fontFamily:"monospace",color:c.red,fontWeight:"bold"}}>{GHS(tr)}</div></div>
+                </div>
+              </div>
+              <div style={{background:c.border,borderRadius:"4px",height:"8px",marginBottom:"6px"}}><div style={{background:c.green,height:"8px",borderRadius:"4px",width:`${Math.min(prog,100)}%`,transition:"width 0.4s"}}/></div>
+              <div style={{fontSize:"10px",color:c.muted,marginBottom:"16px",fontFamily:"monospace"}}>{prog.toFixed(1)}% repaid — {lSchs.filter(sc=>sc.status==="PAID").length} of {selLoan.instalments} cleared</div>
+              <table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr><th style={TH}>#</th><th style={TH}>Due Date</th><th style={TH}>Amount Due</th><th style={TH}>Paid</th><th style={TH}>Remaining</th><th style={TH}>Status</th><th style={TH}>Note</th></tr></thead>
+              <tbody>{lSchs.map(sc=>{const days=daysDiff(sc.dueDate);const band=sc.status!=="PAID"?overdueband(days):null;return <tr key={sc.id} style={{background:sc.status==="PAID"?c.greenSoft:sc.status==="PARTIAL"?c.accentSoft:days>0?"rgba(239,68,68,0.04)":"transparent"}}><td style={{...TD,fontFamily:"monospace",fontWeight:"bold",color:c.accent}}>#{sc.instalment}</td><td style={{...TD,fontFamily:"monospace",fontSize:"11px"}}>{sc.dueDate}</td><td style={{...TD,fontFamily:"monospace"}}>{GHS(sc.amountDue)}</td><td style={{...TD,fontFamily:"monospace",color:c.green}}>{GHS(sc.amountPaid)}</td><td style={{...TD,fontFamily:"monospace",color:sc.remaining>0?c.red:c.green,fontWeight:"bold"}}>{GHS(sc.remaining)}</td><td style={TD}><span style={pill(sc.status)}>{sc.status}</span></td><td style={TD}>{band?<span style={riskBand(band.color)}>{days}d overdue</span>:sc.status==="PAID"?<span style={{color:c.green,fontSize:"11px"}}>✓</span>:<span style={{color:c.muted,fontSize:"11px"}}>Upcoming</span>}</td></tr>;})}</tbody></table>
+            </div>}
+          </>;
+        })()}
+      </div>}
+    </div>
+  );
+
+  // ── OWNER ─────────────────────────────────────────────────────────────────
+  return (
+    <div style={{minHeight:"100vh",background:c.bg}}>
+      {toast&&<div style={{position:"fixed",top:18,right:18,zIndex:2000,background:toast.color,color:"#fff",padding:"11px 18px",borderRadius:"8px",fontSize:"12px",fontFamily:"monospace",boxShadow:"0 4px 20px rgba(0,0,0,0.5)",animation:"fadeIn 0.2s ease"}}>{toast.msg}</div>}
+      <ApproveModal/><RejectModal/>
+      <Header/>
+      <div style={{display:"flex",gap:"4px",padding:"14px 28px 0",borderBottom:`1px solid ${c.border}`,overflowX:"auto"}}>
+        {[["dashboard","Daily Dashboard"],["monthly","Monthly Analysis"],["loans","All Loans"],["members","Members"]].map(([k,l])=>(
+          <button key={k} onClick={()=>setTab(k)} style={{padding:"9px 18px",border:"none",background:tab===k?c.accentSoft:"transparent",color:tab===k?c.accent:c.muted,borderBottom:tab===k?`2px solid ${c.accent}`:"2px solid transparent",cursor:"pointer",fontSize:"13px",fontFamily:"Georgia,serif",whiteSpace:"nowrap"}}>{l}</button>
+        ))}
+      </div>
+      {loading&&<Spinner msg="Loading from Google Sheets..."/>}
+      {!loading&&<div style={{padding:"24px 28px",maxWidth:"1280px"}}>
+
+        {tab==="dashboard"&&<>
+          <div style={SEC}>Today — {TODAY.toDateString()}</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"14px",marginBottom:"24px"}}>
+            {[[c.accent,todayM.length,"New Members"],[c.orange,pendingLoans.length,"Pending Approval"],[c.blue,GHS(todayOut),"Disbursed Today"],[c.green,GHS(todayIn),"Collected Today"]].map(([ac,val,label])=>(
+              <div key={label} style={SC(ac)}><div style={{fontSize:typeof val==="number"?"28px":"18px",fontWeight:"bold",color:c.text,lineHeight:1.2,fontFamily:"monospace"}}>{val}</div><div style={{fontSize:"10px",color:c.muted,textTransform:"uppercase",letterSpacing:"1.5px",marginTop:"4px"}}>{label}</div></div>
+            ))}
+          </div>
+          <div style={{...CARD,borderLeft:`4px solid ${c.red}`,background:overdueList.length>0?"rgba(239,68,68,0.06)":c.card}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div><div style={{fontSize:"11px",color:c.red,letterSpacing:"2px",textTransform:"uppercase",fontFamily:"monospace",marginBottom:"4px"}}>⚠ Portfolio at Risk</div><div style={{fontSize:"32px",fontFamily:"monospace",color:overdueList.length>0?c.red:c.muted,fontWeight:"bold"}}>{GHS(portfolioAtRisk)}</div><div style={{fontSize:"12px",color:c.muted,marginTop:"4px"}}>{overdueList.length} overdue instalment{overdueList.length!==1?"s":""} across {new Set(overdueList.map(o=>o.loanId)).size} loan{new Set(overdueList.map(o=>o.loanId)).size!==1?"s":""}</div></div>
+              {overdueList.length===0&&<div style={{color:c.green,fontSize:"13px"}}>✓ All payments on track</div>}
+            </div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"18px",marginBottom:"20px"}}>
+            <div style={{...CARD,marginBottom:0}}><div style={SEC}>New Members Today</div>{todayM.length===0?<div style={{color:c.muted,fontSize:"12px"}}>No new members today.</div>:<table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr><th style={TH}>ID</th><th style={TH}>Name</th><th style={TH}>Phone</th></tr></thead><tbody>{todayM.map(m=><tr key={m.id}><td style={{...TD,fontFamily:"monospace",color:c.accent}}>{m.id}</td><td style={TD}>{m.fullName}</td><td style={{...TD,fontFamily:"monospace"}}>{m.phone}</td></tr>)}</tbody></table>}</div>
+            <div style={{...CARD,marginBottom:0}}><div style={SEC}>Loans Awaiting Approval</div>{pendingLoans.length===0?<div style={{color:c.muted,fontSize:"12px"}}>No pending loans.</div>:<table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr><th style={TH}>Member</th><th style={TH}>Amount</th><th style={TH}>Cycle</th><th style={TH}>Actions</th></tr></thead><tbody>{pendingLoans.map(l=><tr key={l.id}><td style={TD}>{l.memberName}</td><td style={{...TD,fontFamily:"monospace"}}>{GHS(l.principalRequested)}</td><td style={TD}>{l.cycle}</td><td style={TD}><button onClick={()=>openApprove(l)} style={{background:c.accent,color:"#000",border:"none",borderRadius:"6px",padding:"5px 10px",cursor:"pointer",fontWeight:"bold",fontSize:"11px",marginRight:"6px"}}>APPROVE</button><button onClick={()=>openReject(l)} style={{background:c.redSoft,color:c.red,border:`1px solid ${c.red}`,borderRadius:"6px",padding:"5px 10px",cursor:"pointer",fontWeight:"bold",fontSize:"11px"}}>REJECT</button></td></tr>)}</tbody></table>}</div>
+          </div>
+          <div style={CARD}><div style={SEC}>Overdue — Action Required</div>{overdueList.length===0?<div style={{color:c.green,fontSize:"12px"}}>✓ No overdue payments.</div>:<table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr><th style={TH}>Member</th><th style={TH}>Loan</th><th style={TH}>Due Date</th><th style={TH}>Days</th><th style={TH}>Owed</th><th style={TH}>Band</th><th style={TH}>Action</th></tr></thead><tbody>{overdueList.map(sc=><tr key={sc.id}><td style={TD}>{sc.memberName}</td><td style={{...TD,fontFamily:"monospace",color:c.accent}}>{sc.loanId}</td><td style={{...TD,fontFamily:"monospace",fontSize:"11px"}}>{sc.dueDate}</td><td style={{...TD,fontFamily:"monospace",color:c.red,fontWeight:"bold"}}>{sc.days}d</td><td style={{...TD,fontFamily:"monospace",color:c.red}}>{GHS(sc.remaining)}</td><td style={TD}><span style={riskBand(sc.band.color)}>{sc.band.label}</span></td><td style={{...TD,fontSize:"11px",color:c.muted}}>{sc.band.action}</td></tr>)}</tbody></table>}</div>
+          <div style={CARD}><div style={SEC}>Payments Received Today</div>{payments.filter(p=>p.date===todayStr).length===0?<div style={{color:c.muted,fontSize:"12px"}}>No payments today.</div>:<table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr><th style={TH}>Receipt</th><th style={TH}>Member</th><th style={TH}>Amount</th><th style={TH}>Method</th></tr></thead><tbody>{payments.filter(p=>p.date===todayStr).map(p=><tr key={p.id}><td style={{...TD,fontFamily:"monospace",color:c.accent}}>{p.receipt}</td><td style={TD}>{p.memberName}</td><td style={{...TD,fontFamily:"monospace",color:c.green}}>{GHS(p.amount)}</td><td style={TD}><span style={{background:p.method==="MOMO"?c.blueSoft:c.accentSoft,color:p.method==="MOMO"?c.blue:c.accent,padding:"2px 8px",borderRadius:"10px",fontSize:"10px",fontFamily:"monospace"}}>{p.method}</span></td></tr>)}</tbody></table>}</div>
+        </>}
+
+        {tab==="monthly"&&<>
+          <div style={SEC}>Monthly Analysis — {TODAY.toLocaleString("default",{month:"long",year:"numeric"})}</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"14px",marginBottom:"24px"}}>
+            {[[c.blue,GHS(mOut),"Total Disbursed"],[c.green,GHS(mIn),"Total Collected"],[c.accent,GHS(mInterest),"Interest Earned"],[c.purple,GHS(portVal),"Live Portfolio"]].map(([ac,val,label])=>(
+              <div key={label} style={SC(ac)}><div style={{fontSize:"17px",fontWeight:"bold",color:c.text,lineHeight:1.2,fontFamily:"monospace"}}>{val}</div><div style={{fontSize:"10px",color:c.muted,textTransform:"uppercase",letterSpacing:"1.5px",marginTop:"4px"}}>{label}</div></div>
+            ))}
+          </div>
+          <div style={{...CARD,borderLeft:`4px solid ${c.red}`,background:overdueList.length>0?"rgba(239,68,68,0.06)":c.card,marginBottom:"20px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div><div style={{fontSize:"11px",color:c.red,letterSpacing:"2px",textTransform:"uppercase",fontFamily:"monospace",marginBottom:"4px"}}>⚠ Portfolio at Risk</div><div style={{fontSize:"32px",fontFamily:"monospace",color:overdueList.length>0?c.red:c.muted,fontWeight:"bold"}}>{GHS(portfolioAtRisk)}</div></div>
+              <div style={{textAlign:"right"}}><div style={{fontSize:"11px",color:c.muted,marginBottom:"4px"}}>Risk %</div><div style={{fontSize:"24px",fontFamily:"monospace",color:c.red,fontWeight:"bold"}}>{portVal>0?((portfolioAtRisk/portVal)*100).toFixed(1):"0.0"}%</div></div>
+            </div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"18px",marginBottom:"20px"}}>
+            <div style={{...CARD,marginBottom:0}}><div style={SEC}>Loan Status Breakdown</div>{["PENDING","APPROVED","ACTIVE","REJECTED","PAID_OFF"].map(status=>{const count=loans.filter(l=>l.status===status).length;const total=loans.filter(l=>l.status===status).reduce((s,l)=>s+(l.principalApproved||l.principalRequested||0),0);return <div key={status} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:`1px solid ${c.border}`}}><span style={pill(status)}>{status}</span><div style={{textAlign:"right"}}><div style={{fontFamily:"monospace",fontSize:"13px"}}>{count} loan{count!==1?"s":""}</div><div style={{fontFamily:"monospace",fontSize:"11px",color:c.muted}}>{GHS(total)}</div></div></div>;})}
+            </div>
+            <div style={{...CARD,marginBottom:0}}><div style={SEC}>Cash Flow</div>
+              <div style={{marginBottom:"14px"}}><div style={{fontSize:"10px",color:c.muted,marginBottom:"4px",textTransform:"uppercase",letterSpacing:"1px"}}>Money Out</div><div style={{fontSize:"22px",fontFamily:"monospace",color:c.red}}>− {GHS(mOut)}</div></div>
+              <div style={{marginBottom:"14px"}}><div style={{fontSize:"10px",color:c.muted,marginBottom:"4px",textTransform:"uppercase",letterSpacing:"1px"}}>Money In</div><div style={{fontSize:"22px",fontFamily:"monospace",color:c.green}}>+ {GHS(mIn)}</div></div>
+              <div style={{borderTop:`2px solid ${c.accent}`,paddingTop:"14px"}}><div style={{fontSize:"10px",color:c.accent,marginBottom:"4px",textTransform:"uppercase",letterSpacing:"1px"}}>Net Position</div><div style={{fontSize:"26px",fontFamily:"monospace",fontWeight:"bold",color:mIn-mOut>=0?c.green:c.red}}>{mIn-mOut>=0?"+":""}{GHS(mIn-mOut)}</div></div>
+            </div>
+          </div>
+          <div style={CARD}><div style={SEC}>Overdue Breakdown</div>{overdueList.length===0?<div style={{color:c.green,fontSize:"12px"}}>✓ No overdue payments.</div>:<table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr><th style={TH}>Member</th><th style={TH}>Loan</th><th style={TH}>Due Date</th><th style={TH}>Days</th><th style={TH}>Remaining</th><th style={TH}>Band</th><th style={TH}>Action</th></tr></thead><tbody>{overdueList.map(sc=><tr key={sc.id}><td style={TD}>{sc.memberName}</td><td style={{...TD,fontFamily:"monospace",color:c.accent}}>{sc.loanId}</td><td style={{...TD,fontFamily:"monospace",fontSize:"11px"}}>{sc.dueDate}</td><td style={{...TD,fontFamily:"monospace",color:c.red,fontWeight:"bold"}}>{sc.days}d</td><td style={{...TD,fontFamily:"monospace",color:c.red}}>{GHS(sc.remaining)}</td><td style={TD}><span style={riskBand(sc.band.color)}>{sc.band.label}</span></td><td style={{...TD,fontSize:"11px",color:c.muted}}>{sc.band.action}</td></tr>)}</tbody></table>}</div>
+        </>}
+
+        {tab==="loans"&&<>
+          <div style={SEC}>All Loans</div>
+          {rejLoans.length>0&&<div style={{...CARD,borderLeft:`4px solid ${c.red}`,background:"rgba(239,68,68,0.04)",marginBottom:"16px"}}><div style={{fontSize:"11px",color:c.red,letterSpacing:"2px",textTransform:"uppercase",fontFamily:"monospace",marginBottom:"10px"}}>Rejection History</div>{rejLoans.map(l=><div key={l.id} style={{padding:"10px 0",borderBottom:`1px solid ${c.border}`}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:"4px"}}><span style={{fontFamily:"monospace",fontSize:"12px",color:c.accent}}>{l.id}</span><span style={{fontFamily:"monospace",fontSize:"11px",color:c.muted}}>{l.memberName} · {l.rejectionDate}</span></div><div style={{fontSize:"12px",color:c.muted,fontStyle:"italic"}}>"{l.rejectionReason}"</div></div>)}</div>}
+          <div style={CARD}><table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr><th style={TH}>ID</th><th style={TH}>Member</th><th style={TH}>Requested</th><th style={TH}>Approved</th><th style={TH}>Total Debt</th><th style={TH}>Cycle</th><th style={TH}>Status</th><th style={TH}>Action</th></tr></thead><tbody>{loans.map(l=><tr key={l.id}><td style={{...TD,fontFamily:"monospace",color:c.accent}}>{l.id}</td><td style={TD}>{l.memberName}</td><td style={{...TD,fontFamily:"monospace",color:c.muted,fontSize:"11px"}}>{GHS(l.principalRequested)}</td><td style={{...TD,fontFamily:"monospace"}}>{l.principalApproved?GHS(l.principalApproved):"—"}</td><td style={{...TD,fontFamily:"monospace",color:c.green}}>{l.totalDebt?GHS(l.totalDebt):"—"}</td><td style={TD}>{l.cycle}</td><td style={TD}><span style={pill(l.status)}>{l.status}</span></td><td style={TD}>{l.status==="PENDING"&&<><button onClick={()=>openApprove(l)} style={{background:c.accent,color:"#000",border:"none",borderRadius:"6px",padding:"5px 10px",cursor:"pointer",fontWeight:"bold",fontSize:"11px",marginRight:"6px"}}>APPROVE</button><button onClick={()=>openReject(l)} style={{background:c.redSoft,color:c.red,border:`1px solid ${c.red}`,borderRadius:"6px",padding:"5px 10px",cursor:"pointer",fontWeight:"bold",fontSize:"11px"}}>REJECT</button></>}{l.status==="APPROVED"&&<button onClick={()=>markDisbursed(l)} style={{background:c.blue,color:"#fff",border:"none",borderRadius:"6px",padding:"5px 10px",cursor:"pointer",fontWeight:"bold",fontSize:"11px"}}>MARK DISBURSED</button>}{l.status==="REJECTED"&&<span style={{fontSize:"11px",color:c.muted,fontStyle:"italic"}}>"{l.rejectionReason?.slice(0,30)}..."</span>}{(l.status==="ACTIVE"||l.status==="PAID_OFF")&&<span style={{color:c.muted,fontSize:"11px"}}>—</span>}</td></tr>)}</tbody></table></div>
+        </>}
+
+        {tab==="members"&&<>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px",flexWrap:"wrap",gap:"10px"}}>
+            <div style={SEC}>Member Register — {members.length} Member{members.length!==1?"s":""}</div>
+            <input style={{...INP,width:"240px",fontSize:"12px"}} placeholder="🔍 Search name, phone or ID..." value={search} onChange={e=>setSearch(e.target.value)}/>
+          </div>
+          {filteredM.length===0&&<div style={{...CARD,color:c.muted,fontSize:"12px",textAlign:"center",padding:"30px"}}>No members found{search?` matching "${search}"`:""}.</div>}
+          {filteredM.map(m=>{
+            const mLoans=loans.filter(l=>l.memberId===m.id);
+            const isExp=expMember===m.id;
+            return <div key={m.id} style={CARD}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}} onClick={()=>setExpMember(isExp?null:m.id)}>
+                <div style={{display:"flex",alignItems:"center",gap:"14px"}}>
+                  <div style={{width:"40px",height:"40px",borderRadius:"50%",background:c.accentSoft,border:`2px solid ${c.accent}`,display:"flex",alignItems:"center",justifyContent:"center",color:c.accent,fontWeight:"bold",fontSize:"14px",flexShrink:0}}>{m.fullName.charAt(0)}</div>
+                  <div><div style={{fontWeight:"bold",color:c.text}}>{m.fullName}</div><div style={{fontSize:"11px",color:c.muted,fontFamily:"monospace"}}>{m.id} · {m.phone} · {m.typeOfBusiness}</div></div>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:"8px",flexWrap:"wrap"}}>
+                  {mLoans.map(l=><span key={l.id} style={pill(l.status)}>{l.status}</span>)}
+                  <span style={{color:c.muted,fontSize:"12px"}}>{isExp?"▲":"▼"}</span>
+                </div>
+              </div>
+              {isExp&&<div style={{marginTop:"16px",display:"grid",gridTemplateColumns:"1fr 1fr",gap:"20px",paddingTop:"16px",borderTop:`1px solid ${c.border}`}}>
+                <div>
+                  <div style={{fontSize:"11px",color:c.blue,letterSpacing:"1px",textTransform:"uppercase",fontFamily:"monospace",marginBottom:"8px"}}>Customer Details</div>
+                  {[["Phone",m.phone],["Gender",m.gender],["Marital Status",m.maritalStatus],["DOB",m.dob],["Address",m.residentialAddress],["Home Town",m.homeTown],["Dependents",m.dependents],["Business",m.typeOfBusiness],["Biz Location",m.businessLocation],["Worship",`${m.placeOfWorship||""}${m.worshipLocation?", "+m.worshipLocation:""}`],["Ghana Card",m.ghanaCard],["GPS",m.digitalAddress],["Alt MoMo",m.alternateMomo]].filter(([,v])=>v).map(([label,val])=>(
+                    <div key={label} style={{display:"flex",gap:"8px",marginBottom:"4px",fontSize:"12px"}}><span style={{color:c.muted,minWidth:"100px"}}>{label}</span><span style={{color:c.text}}>{val}</span></div>
+                  ))}
+                </div>
+                <div>
+                  <div style={{fontSize:"11px",color:c.orange,letterSpacing:"1px",textTransform:"uppercase",fontFamily:"monospace",marginBottom:"8px"}}>Guarantor</div>
+                  {m.guarantor&&[["Name",m.guarantor.name],["Relationship",m.guarantor.relationship],["Phone",m.guarantor.phone],["Address",m.guarantor.residentialAddress],["Occupation",m.guarantor.occupation],["Worship",m.guarantor.placeOfWorship]].filter(([,v])=>v).map(([label,val])=>(
+                    <div key={label} style={{display:"flex",gap:"8px",marginBottom:"4px",fontSize:"12px"}}><span style={{color:c.muted,minWidth:"90px"}}>{label}</span><span style={{color:c.text}}>{val}</span></div>
+                  ))}
+                  <div style={{marginTop:"14px",fontSize:"11px",color:c.muted,letterSpacing:"1px",textTransform:"uppercase",fontFamily:"monospace",marginBottom:"8px"}}>Loan History</div>
+                  {mLoans.length===0?<div style={{color:c.muted,fontSize:"12px"}}>No loans.</div>:mLoans.map(l=>(
+                    <div key={l.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:`1px solid ${c.border}`,fontSize:"12px",flexWrap:"wrap",gap:"4px"}}>
+                      <span style={{fontFamily:"monospace",color:c.accent}}>{l.id}</span>
+                      <span>{GHS(l.principalRequested)}</span>
+                      <span style={pill(l.status)}>{l.status}</span>
+                      {l.status==="REJECTED"&&<span style={{fontSize:"11px",color:c.muted,fontStyle:"italic",width:"100%"}}>{l.rejectionReason}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>}
+            </div>;
+          })}
+        </>}
+
+      </div>}
+    </div>
+  );
+}
+
+ReactDOM.render(<App/>, document.getElementById("root"));
+</script>
+</body>
+</html>
