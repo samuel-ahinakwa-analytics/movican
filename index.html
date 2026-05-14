@@ -452,6 +452,50 @@ function App(){
   };
 
   // Header
+  const ApproveModal = () => !appModal ? null : (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:"20px"}}>
+      <div style={{background:c.card,border:`1px solid ${c.accent}`,borderRadius:"16px",padding:"28px",width:"520px",maxWidth:"100%",maxHeight:"90vh",overflowY:"auto"}}>
+        <div style={{fontSize:"17px",fontWeight:"bold",color:c.accent,marginBottom:"18px"}}>⚡ Authorise Loan — {appModal.loan.id}</div>
+        {[["Member",appModal.loan.memberName,c.text],["Requested",GHS(appModal.loan.principalRequested),c.muted],["Cycle",appModal.loan.cycle,c.text],["Purpose",appModal.loan.purposeOfLoan||"—",c.muted]].map(([l,v,col])=>(
+          <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:`1px solid ${c.border}`,fontSize:"13px"}}><span style={{color:c.muted}}>{l}</span><span style={{color:col,fontFamily:"monospace",fontWeight:"bold"}}>{v}</span></div>
+        ))}
+        <div style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:`1px solid ${c.border}`,fontSize:"13px",alignItems:"center"}}>
+          <span style={{color:c.muted}}>Amount to Approve <span style={{color:c.accent}}>(editable)</span></span>
+          <input style={{background:"#0A0F1E",border:`1px solid ${c.accent}`,borderRadius:"6px",padding:"5px 9px",color:c.text,fontFamily:"monospace",fontSize:"13px",width:"130px",textAlign:"right"}} type="number" value={appModal.approvedAmount} onChange={e=>updateApp("approvedAmount",e.target.value)}/>
+        </div>
+        <div style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:`1px solid ${c.border}`,fontSize:"13px",alignItems:"center"}}>
+          <span style={{color:c.muted}}>No. of Instalments <span style={{color:c.accent}}>(editable)</span></span>
+          <input style={{background:"#0A0F1E",border:`1px solid ${c.accent}`,borderRadius:"6px",padding:"5px 9px",color:c.text,fontFamily:"monospace",fontSize:"13px",width:"130px",textAlign:"right"}} type="number" min="1" value={appModal.approvedInstalments} onChange={e=>updateApp("approvedInstalments",e.target.value)}/>
+        </div>
+        <div style={{margin:"12px 0 4px",padding:"12px",background:c.accentSoft,borderRadius:"8px"}}>
+          <div style={{fontSize:"10px",color:c.muted,letterSpacing:"1px",marginBottom:"8px",textTransform:"uppercase"}}>Auto-Calculated</div>
+          {[["Duration",`${(appModal.months||0).toFixed(2)} months`,c.text],["Interest (5%/month)",GHS(appModal.totalInterest),c.accent],["Total Debt",GHS(appModal.totalDebt),c.green],["Per Instalment",GHS(appModal.instalmentAmount),c.text]].map(([l,v,col])=>(
+            <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${c.border}`,fontSize:"13px"}}><span style={{color:c.muted}}>{l}</span><span style={{color:col,fontFamily:"monospace",fontWeight:"bold"}}>{v}</span></div>
+          ))}
+        </div>
+        <div style={{marginTop:"10px",padding:"8px 12px",background:c.redSoft,borderRadius:"8px",fontSize:"11px",color:c.red}}>⚠ Once authorised, this record is permanently locked.</div>
+        <button disabled={syncing} onClick={confirmApprove} style={{background:syncing?c.muted:c.green,color:"#fff",border:"none",borderRadius:"8px",padding:"11px 20px",cursor:syncing?"not-allowed":"pointer",fontWeight:"bold",fontSize:"13px",width:"100%",marginTop:"18px",fontFamily:"Georgia,serif"}}>{syncing?"Saving...":"✓ AUTHORISE LOAN"}</button>
+        <button onClick={()=>setAppModal(null)} style={{background:"transparent",color:c.muted,border:`1px solid ${c.border}`,borderRadius:"8px",padding:"11px 20px",cursor:"pointer",fontSize:"13px",width:"100%",marginTop:"8px",fontFamily:"Georgia,serif"}}>Cancel</button>
+      </div>
+    </div>
+  );
+
+  const RejectModal = () => !rejModal ? null : (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:"20px"}}>
+      <div style={{background:c.card,border:`1px solid ${c.red}`,borderRadius:"16px",padding:"28px",width:"480px",maxWidth:"100%"}}>
+        <div style={{fontSize:"17px",fontWeight:"bold",color:c.red,marginBottom:"6px"}}>✕ Reject Loan — {rejModal.id}</div>
+        <div style={{fontSize:"12px",color:c.muted,marginBottom:"20px"}}>Member can reapply. Reason saved permanently.</div>
+        {[["Member",rejModal.memberName],["Amount",GHS(rejModal.principalRequested)],["Cycle",rejModal.cycle]].map(([l,v])=>(
+          <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:`1px solid ${c.border}`,fontSize:"13px"}}><span style={{color:c.muted}}>{l}</span><span style={{color:c.text,fontFamily:"monospace",fontWeight:"bold"}}>{v}</span></div>
+        ))}
+        <div style={{marginTop:"18px",marginBottom:"6px",fontSize:"11px",color:c.muted,textTransform:"uppercase",letterSpacing:"1px",fontFamily:"monospace"}}>Reason for Rejection</div>
+        <textarea value={rejReason} onChange={e=>setRejReason(e.target.value)} placeholder="Type your reason here..." style={{width:"100%",minHeight:"90px",background:"#0A0F1E",border:`1px solid ${c.red}`,borderRadius:"8px",padding:"10px",color:c.text,fontFamily:"Georgia,serif",fontSize:"13px",resize:"vertical",boxSizing:"border-box",outline:"none"}}/>
+        <button disabled={syncing} onClick={confirmReject} style={{background:syncing?c.muted:c.red,color:"#fff",border:"none",borderRadius:"8px",padding:"11px 20px",cursor:syncing?"not-allowed":"pointer",fontWeight:"bold",fontSize:"13px",width:"100%",marginTop:"16px",fontFamily:"Georgia,serif"}}>{syncing?"Saving...":"✕ CONFIRM REJECTION"}</button>
+        <button onClick={()=>setRejModal(null)} style={{background:"transparent",color:c.muted,border:`1px solid ${c.border}`,borderRadius:"8px",padding:"11px 20px",cursor:"pointer",fontSize:"13px",width:"100%",marginTop:"8px",fontFamily:"Georgia,serif"}}>Cancel</button>
+      </div>
+    </div>
+  );
+
   const Footer = () => (
     <div style={{textAlign:"center",padding:"32px 20px",borderTop:`1px solid ${c.border}`,marginTop:"20px"}}>
       <div style={{fontSize:"10px",color:c.muted,letterSpacing:"1px",textTransform:"uppercase",fontFamily:"monospace"}}>Software developed by</div>
