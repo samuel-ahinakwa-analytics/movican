@@ -6,8 +6,6 @@
 <title>Movican Micro Credit Enterprise</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -25,86 +23,6 @@ optgroup{background:#0A0F1E;color:#64748B;font-style:normal;}
 <body>
 <div id="root"></div>
 <script type="text/babel">
-
-// ── FIREBASE CONFIG ───────────────────────────────────────────────────────────
-const firebaseConfig = {
-  apiKey: "AIzaSyA02JUGCcDop7edUe07OZnpZc0CeHTqvmI",
-  authDomain: "movican-microfinance.firebaseapp.com",
-  projectId: "movican-microfinance",
-  storageBucket: "movican-microfinance.firebasestorage.app",
-  messagingSenderId: "651486699093",
-  appId: "1:651486699093:web:1411dd4b06bba0d391fedc"
-};
-
-let db_fire = null;
-let fireReady = false;
-
-function initFirebase() {
-  try {
-    if (typeof firebase === "undefined") { fireReady=false; return; }
-    if (!firebase.apps || firebase.apps.length === 0) {
-      firebase.initializeApp(firebaseConfig);
-    }
-    db_fire = firebase.firestore();
-    fireReady = true;
-  } catch(e) { fireReady = false; }
-}
-
-async function loadAllFromFirebase() {
-  if (!fireReady || !db_fire) return null;
-  try {
-    const [mSnap,lSnap,sSnap,pSnap,aSnap,bSnap] = await Promise.all([
-      db_fire.collection("members").get(),
-      db_fire.collection("loans").get(),
-      db_fire.collection("schedules").get(),
-      db_fire.collection("payments").get(),
-      db_fire.collection("audit").limit(500).get(),
-      db_fire.collection("settings").doc("branches").get(),
-    ]);
-    return {
-      members: mSnap.docs.map(d=>d.data()),
-      loans:   lSnap.docs.map(d=>d.data()),
-      schedules: sSnap.docs.map(d=>d.data()),
-      payments: pSnap.docs.map(d=>d.data()),
-      auditLog: aSnap.docs.map(d=>d.data()),
-      branches: bSnap.exists ? bSnap.data().list : DEFAULT_BRANCHES
-    };
-  } catch(e) { console.warn("Firebase load error:",e); return null; }
-}
-
-async function fbSet(col,docId,data) {
-  if(!fireReady||!db_fire) return false;
-  try { await db_fire.collection(col).doc(docId).set(data,{merge:true}); return true; } catch(e){return false;}
-}
-async function fbAddAudit(action,detail,actor) {
-  if(!fireReady||!db_fire) return;
-  try { await db_fire.collection("audit").add({ts:new Date().toISOString(),action,detail,actor:actor||"system"}); } catch(e){}
-}
-async function fbSaveMember(data) {
-  const g=data.guarantor||{};
-  return fbSet("members",data.id,{member_id:data.id,full_name:data.fullName,phone:data.phone,gender:data.gender,marital_status:data.maritalStatus,dob:data.dob,residential_address:data.residentialAddress,home_town:data.homeTown,dependents:data.dependents,type_of_business:data.typeOfBusiness,business_location:data.businessLocation,place_of_worship:data.placeOfWorship,worship_location:data.worshipLocation,ghana_card:data.ghanaCard,digital_address:data.digitalAddress,alternate_momo:data.alternateMomo,join_date:data.joinDate,branch:data.branch||"Head Office",guarantor_name:g.name||"",guarantor_relationship:g.relationship||"",guarantor_gender:g.gender||"",guarantor_marital_status:g.maritalStatus||"",guarantor_dob:g.dob||"",guarantor_phone:g.phone||"",guarantor_residential_address:g.residentialAddress||"",guarantor_home_town:g.homeTown||"",guarantor_dependents:g.dependents||"",guarantor_occupation:g.occupation||"",guarantor_business_location:g.businessLocation||"",guarantor_place_of_worship:g.placeOfWorship||"",guarantor_worship_location:g.worshipLocation||"",updated_at:new Date().toISOString()});
-}
-async function fbSaveLoan(data) {
-  return fbSet("loans",data.id,{loan_id:data.id,member_id:data.memberId,member_name:data.memberName,principal_requested:data.principalRequested,principal_approved:data.principalApproved||"",interest_rate:data.interestRate||5,calc_method:data.calcMethod||"FLAT",cycle:data.cycle,instalments:data.instalments,purpose_of_loan:data.purposeOfLoan||"",primary_source_of_repayment:data.primarySourceOfRepayment||"",previous_loan_amount:data.previousLoanAmount||"",status:data.status,submission_date:data.submissionDate,approval_date:data.approvalDate||"",disbursed_date:data.disbursedDate||"",rejection_date:data.rejectionDate||"",rejection_reason:data.rejectionReason||"",total_interest:data.totalInterest||"",total_debt:data.totalDebt||"",instalment_amount:data.instalmentAmount||"",branch:data.branch||"Head Office",officer:data.officer||"",updated_at:new Date().toISOString()});
-}
-async function fbUpdateLoan(loanId,updates) {
-  if(!fireReady||!db_fire) return false;
-  try { await db_fire.collection("loans").doc(loanId).update({...updates,updated_at:new Date().toISOString()}); return true; } catch(e){return false;}
-}
-async function fbSaveSchedules(schs) {
-  if(!fireReady||!db_fire) return false;
-  const arr=Array.isArray(schs)?schs:[schs];
-  const batch=db_fire.batch();
-  arr.forEach(sc=>{const ref=db_fire.collection("schedules").doc(sc.id);batch.set(ref,{schedule_id:sc.id,loan_id:sc.loanId,instalment:sc.instalment,due_date:sc.dueDate,amount_due:sc.amountDue,amount_paid:sc.amountPaid||0,remaining:sc.remaining,penalty:sc.penalty||0,status:sc.status,updated_at:new Date().toISOString()},{merge:true});});
-  try { await batch.commit(); return true; } catch(e){return false;}
-}
-async function fbUpdateSchedule(schedId,updates) {
-  if(!fireReady||!db_fire) return false;
-  try { await db_fire.collection("schedules").doc(schedId).update({...updates,updated_at:new Date().toISOString()}); return true; } catch(e){return false;}
-}
-async function fbSavePayment(data) {
-  return fbSet("payments",data.id,{payment_id:data.id,loan_id:data.loanId,member_name:data.memberName,amount:data.amount,method:data.method,date:data.date,receipt:data.receipt,sender_phone:data.senderPhone||"",updated_at:new Date().toISOString()});
-}
 
 // ── CONFIG ────────────────────────────────────────────────────────────────────
 // FIX 2: GAS URL base64-encoded
@@ -537,51 +455,30 @@ function apiPost(action, data) {
     const g=data.guarantor||{};
     db.members = db.members.filter(m=>m.member_id!==data.id);
     db.members.push({member_id:data.id,full_name:data.fullName,phone:data.phone,gender:data.gender,marital_status:data.maritalStatus,dob:data.dob,residential_address:data.residentialAddress,home_town:data.homeTown,dependents:data.dependents,type_of_business:data.typeOfBusiness,business_location:data.businessLocation,place_of_worship:data.placeOfWorship,worship_location:data.worshipLocation,ghana_card:data.ghanaCard,digital_address:data.digitalAddress,alternate_momo:data.alternateMomo,join_date:data.joinDate,branch:data.branch||"Head Office",guarantor_name:g.name||"",guarantor_relationship:g.relationship||"",guarantor_gender:g.gender||"",guarantor_marital_status:g.maritalStatus||"",guarantor_dob:g.dob||"",guarantor_phone:g.phone||"",guarantor_residential_address:g.residentialAddress||"",guarantor_home_town:g.homeTown||"",guarantor_dependents:g.dependents||"",guarantor_occupation:g.occupation||"",guarantor_business_location:g.businessLocation||"",guarantor_place_of_worship:g.placeOfWorship||"",guarantor_worship_location:g.worshipLocation||""});
-    addAudit(db,"MEMBER_REGISTERED",data.fullName+" at "+(data.branch||"HQ"),"admin");
-    lsSave(db);
-    // Save to Firebase (real-time) + GAS (backup sheet)
-    if (fireReady) { fbSaveMember(data); fbAddAudit("MEMBER_REGISTERED",data.fullName+" at "+(data.branch||"HQ"),actor||"admin"); }
-    gasPost("saveMember",data);
-    return Promise.resolve({success:true});
+    addAudit(db,"MEMBER_REGISTERED",data.fullName+" at "+(data.branch||"HQ"),"admin"); lsSave(db); gasPost("saveMember",data); return Promise.resolve({success:true});
   }
   if (action==="saveLoan") {
     db.loans = db.loans.filter(l=>l.loan_id!==data.id);
     db.loans.push({loan_id:data.id,member_id:data.memberId,member_name:data.memberName,principal_requested:data.principalRequested,principal_approved:"",cycle:data.cycle,instalments:data.instalments,purpose_of_loan:data.purposeOfLoan||"",primary_source_of_repayment:data.primarySourceOfRepayment||"",previous_loan_amount:data.previousLoanAmount||"",status:data.status,submission_date:data.submissionDate,approval_date:"",disbursed_date:"",rejection_date:"",rejection_reason:"",total_interest:"",total_debt:"",instalment_amount:"",branch:data.branch||"Head Office",officer:data.officer||""});
-    lsSave(db);
-    if (fireReady) fbSaveLoan(data);
-    gasPost("saveLoan",data);
-    return Promise.resolve({success:true});
+    lsSave(db); gasPost("saveLoan",data); return Promise.resolve({success:true});
   }
   if (action==="updateLoan") {
     db.loans = db.loans.map(l=>{ if(l.loan_id!==data.id)return l; const u={...l}; Object.keys(data.updates).forEach(k=>{u[k]=data.updates[k];}); return u; });
-    lsSave(db);
-    if (fireReady) fbUpdateLoan(data.id, data.updates);
-    gasPost("updateLoan",data);
-    return Promise.resolve({success:true});
+    lsSave(db); gasPost("updateLoan",data); return Promise.resolve({success:true});
   }
   if (action==="saveSchedule") {
     const schs = Array.isArray(data)?data:[data];
     schs.forEach(sc=>{ db.schedules=db.schedules.filter(s=>s.schedule_id!==sc.id); db.schedules.push({schedule_id:sc.id,loan_id:sc.loanId,instalment:sc.instalment,due_date:sc.dueDate,amount_due:sc.amountDue,amount_paid:sc.amountPaid,remaining:sc.remaining,status:sc.status}); });
-    lsSave(db);
-    if (fireReady) fbSaveSchedules(data);
-    gasPost("saveSchedule",data);
-    return Promise.resolve({success:true});
+    lsSave(db); gasPost("saveSchedule",data); return Promise.resolve({success:true});
   }
   if (action==="updateSchedule") {
     db.schedules = db.schedules.map(s=>{ if(s.schedule_id!==data.id)return s; const u={...s}; Object.keys(data.updates).forEach(k=>{u[k]=data.updates[k];}); return u; });
-    lsSave(db);
-    if (fireReady) fbUpdateSchedule(data.id, data.updates);
-    gasPost("updateSchedule",data);
-    return Promise.resolve({success:true});
+    lsSave(db); gasPost("updateSchedule",data); return Promise.resolve({success:true});
   }
   if (action==="savePayment") {
     db.payments = db.payments.filter(p=>p.payment_id!==data.id);
     db.payments.push({payment_id:data.id,loan_id:data.loanId,member_name:data.memberName,amount:data.amount,method:data.method,date:data.date,receipt:data.receipt,sender_phone:data.senderPhone||""});
-    addAudit(db,"PAYMENT_LOGGED",data.memberName+": GHS "+data.amount+" via "+data.method,"admin");
-    lsSave(db);
-    if (fireReady) { fbSavePayment(data); fbAddAudit("PAYMENT_LOGGED",data.memberName+": GHS "+data.amount+" via "+data.method,actor||"admin"); }
-    gasPost("savePayment",data);
-    return Promise.resolve({success:true});
+    addAudit(db,"PAYMENT_LOGGED",data.memberName+": GHS "+data.amount+" via "+data.method,"admin"); lsSave(db); gasPost("savePayment",data); return Promise.resolve({success:true});
   }
   return Promise.resolve({success:true});
 }
@@ -1509,7 +1406,7 @@ function App() {
           <div style={SEC}>Data Backup</div>
           <div style={{...CARD,borderLeft:`4px solid ${offline?C.red:C.green}`}}>
             <div style={{fontSize:"14px",fontWeight:"bold",color:C.text,marginBottom:"8px"}}>Cloud Sync Status</div>
-            <div style={{fontFamily:"monospace",color:offline?C.red:C.green,fontSize:"13px",marginBottom:"4px"}}>{offline?offline?"OFFLINE — cloud sync failing":(fireReady?"ONLINE — Firebase real-time sync active":"ONLINE — local sync only")}</div>
+            <div style={{fontFamily:"monospace",color:offline?C.red:C.green,fontSize:"13px",marginBottom:"4px"}}>{offline?"OFFLINE — sync is failing":"ONLINE — syncing normally"}</div>
             <div style={{fontSize:"12px",color:C.muted,marginBottom:"16px"}}>Last successful sync: {lastSync?new Date(lastSync).toLocaleString():"Never"}{syncFails>0?` · Failed ${syncFails}x`:""}</div>
             <button onClick={()=>exportBackup(members,loans,schedules,payments)} style={{background:C.blue,color:"#fff",border:"none",borderRadius:"8px",padding:"12px 24px",cursor:"pointer",fontWeight:"bold",fontSize:"13px",fontFamily:"Georgia,serif",marginRight:"12px"}}>DOWNLOAD JSON BACKUP</button>
             <button onClick={loadData} style={{background:"transparent",border:`1px solid ${C.blue}`,color:C.blue,borderRadius:"8px",padding:"12px 24px",cursor:"pointer",fontWeight:"bold",fontSize:"13px",fontFamily:"Georgia,serif"}}>FORCE SYNC NOW</button>
@@ -1527,8 +1424,6 @@ function App() {
   );
 }
 
-// Initialize Firebase before rendering
-try { initFirebase(); } catch(e) { console.warn('Firebase init error:', e); }
 ReactDOM.render(<App/>, document.getElementById("root"));
 </script>
 </body>
