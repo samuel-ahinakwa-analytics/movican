@@ -28,7 +28,7 @@ optgroup{background:#0A0F1E;color:#64748B;font-style:normal;}
 // FIX 2: GAS URL base64-encoded
 const GAS_URL = atob("aHR0cHM6Ly9zY3JpcHQuZ29vZ2xlLmNvbS9tYWNyb3Mvcy9BS2Z5Y2J4bXc5cDN4NDU1NTRMdmw4LVZnQUtTSjgtWXBTM24zOTc5TjhPVnIzd3N4N0UyblpsaF9kYWo4akFad2hMUS1tRDRLQS9leGVj");
 // FIX 1: Password base64-encoded
-const DIRECTOR_PASSWORD = btoa("movican2026");
+const CREDIT ANALYST_PASSWORD = btoa("movican2026");
 const LS_KEY = "movican_v3";
 const DEFAULT_BRANCHES = ["Head Office","Accra","Kumasi","Tamale","Cape Coast"];
 
@@ -676,7 +676,7 @@ function App() {
     setSyncing(true);
     const nl={...lForm,id:uid("L"),memberName:mem.fullName,principalRequested:Number(lForm.principalRequested),instalments:Number(lForm.instalments),principalApproved:null,status:"PENDING",approvalDate:null,disbursedDate:null,rejectionDate:null,rejectionReason:null,totalInterest:null,totalDebt:null,instalmentAmount:null,officer:adminName,branch:lForm.branch||mem.branch||"Head Office"};
     await apiPost("saveLoan",nl);
-    setLoans(prev=>[...prev,nl]); setLForm(EL); setSyncing(false); toast2(`✓ Loan submitted for Director approval.`);
+    setLoans(prev=>[...prev,nl]); setLForm(EL); setSyncing(false); toast2(`✓ Loan submitted for Credit Analyst approval.`);
   };
 
   const submitPayment = async() => {
@@ -702,8 +702,8 @@ function App() {
   };
 
   // FIX 1: btoa password check
-  const handleDirectorLogin = () => {
-    if(btoa(pwInput)===DIRECTOR_PASSWORD){setRole("owner");setTab("dashboard");setPwModal(false);setPwInput("");setPwError("");}
+  const handleCredit AnalystLogin = () => {
+    if(btoa(pwInput)===CREDIT ANALYST_PASSWORD){setRole("owner");setTab("dashboard");setPwModal(false);setPwInput("");setPwError("");}
     else{setPwError("Incorrect password. Please try again.");setPwInput("");}
   };
   const handleAdminLogin = () => { if(!adminInput.trim())return; setAdminName(adminInput.trim()); setRole("admin"); setAdminInput(""); };
@@ -950,7 +950,7 @@ function App() {
         {role==="owner"&&overdueList.length>0&&<span style={{background:C.redS,color:C.red,border:`1px solid ${C.red}`,borderRadius:"20px",padding:"3px 10px",fontSize:"10px",fontFamily:"monospace"}}>{overdueList.length} OVERDUE</span>}
         {role==="owner"&&pending.length>0&&<span style={{background:C.goldS,color:C.gold,border:`1px solid ${C.gold}`,borderRadius:"20px",padding:"3px 10px",fontSize:"10px",fontFamily:"monospace"}}>{pending.length} PENDING</span>}
         {showBranch&&role==="owner"&&<select value={branchFilter} onChange={e=>setBranchFilter(e.target.value)} style={{background:C.card,border:`1px solid ${C.border2}`,borderRadius:"6px",padding:"3px 8px",color:C.gold,fontSize:"11px",fontFamily:"monospace"}}><option value="ALL">All Branches</option>{branches.map(b=><option key={b} value={b}>{b}</option>)}</select>}
-        <span style={{background:role==="owner"?C.goldS:C.blueS,color:role==="owner"?C.gold:C.blue,border:`1px solid ${role==="owner"?C.gold:C.blue}`,borderRadius:"20px",padding:"3px 10px",fontSize:"10px",fontFamily:"monospace"}}>{role==="owner"?"DIRECTOR":`ADMIN: ${adminName}`}</span>
+        <span style={{background:role==="owner"?C.goldS:C.blueS,color:role==="owner"?C.gold:C.blue,border:`1px solid ${role==="owner"?C.gold:C.blue}`,borderRadius:"20px",padding:"3px 10px",fontSize:"10px",fontFamily:"monospace"}}>{role==="owner"?"CREDIT ANALYST":`ADMIN: ${adminName}`}</span>
         <button onClick={loadData} style={{background:"transparent",border:`1px solid ${C.line}`,borderRadius:"6px",padding:"3px 10px",color:C.muted,cursor:"pointer",fontSize:"12px"}}>↻</button>
         <button onClick={()=>setRole(null)} style={{background:"transparent",border:`1px solid ${C.line}`,borderRadius:"6px",padding:"3px 10px",color:C.muted,cursor:"pointer",fontSize:"10px",fontFamily:"monospace"}}>LOGOUT</button>
       </div>
@@ -965,11 +965,11 @@ function App() {
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:"20px"}}>
           <div style={{background:C.card,border:`1px solid ${C.gold}`,borderRadius:"16px",padding:"32px",width:"360px",maxWidth:"100%",textAlign:"center"}}>
             <div style={{fontSize:"30px",marginBottom:"10px"}}>👑</div>
-            <div style={{fontSize:"17px",fontWeight:"bold",color:C.gold,marginBottom:"4px"}}>Director Access</div>
+            <div style={{fontSize:"17px",fontWeight:"bold",color:C.gold,marginBottom:"4px"}}>Credit Analyst Access</div>
             <div style={{fontSize:"12px",color:C.muted,marginBottom:"20px"}}>Enter your password</div>
-            <input type="password" value={pwInput} onChange={e=>{setPwInput(e.target.value);setPwError("");}} onKeyDown={e=>e.key==="Enter"&&handleDirectorLogin()} placeholder="Password" autoFocus style={{background:"#060D1A",border:`1px solid ${C.gold}`,borderRadius:"6px",padding:"12px",color:C.text,fontFamily:"monospace",fontSize:"16px",letterSpacing:"4px",width:"100%",boxSizing:"border-box",outline:"none",textAlign:"center",marginBottom:"10px"}}/>
+            <input type="password" value={pwInput} onChange={e=>{setPwInput(e.target.value);setPwError("");}} onKeyDown={e=>e.key==="Enter"&&handleCredit AnalystLogin()} placeholder="Password" autoFocus style={{background:"#060D1A",border:`1px solid ${C.gold}`,borderRadius:"6px",padding:"12px",color:C.text,fontFamily:"monospace",fontSize:"16px",letterSpacing:"4px",width:"100%",boxSizing:"border-box",outline:"none",textAlign:"center",marginBottom:"10px"}}/>
             {pwError&&<div style={{color:C.red,fontSize:"12px",marginBottom:"10px",fontFamily:"monospace"}}>{pwError}</div>}
-            <button onClick={handleDirectorLogin} style={{background:C.gold,color:"#000",border:"none",borderRadius:"8px",padding:"12px 24px",cursor:"pointer",fontWeight:"bold",fontSize:"14px",width:"100%",fontFamily:"Georgia,serif",marginBottom:"8px"}}>ENTER</button>
+            <button onClick={handleCredit AnalystLogin} style={{background:C.gold,color:"#000",border:"none",borderRadius:"8px",padding:"12px 24px",cursor:"pointer",fontWeight:"bold",fontSize:"14px",width:"100%",fontFamily:"Georgia,serif",marginBottom:"8px"}}>ENTER</button>
             <button onClick={()=>{setPwModal(false);setPwInput("");setPwError("");}} style={{background:"transparent",color:C.muted,border:`1px solid ${C.line}`,borderRadius:"8px",padding:"10px 24px",cursor:"pointer",fontSize:"13px",width:"100%",fontFamily:"Georgia,serif"}}>Cancel</button>
           </div>
         </div>
@@ -980,10 +980,10 @@ function App() {
         <div style={{fontSize:"12px",color:C.muted,marginBottom:"6px",letterSpacing:"1px"}}>ENTERPRISE</div>
         <div style={{fontSize:"11px",color:C.green,fontFamily:"monospace",marginBottom:"28px"}}>System Ready</div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"12px",maxWidth:"720px",width:"100%"}}>
-          {/* Director */}
+          {/* Credit Analyst */}
           <button onClick={()=>setPwModal(true)} style={{background:C.goldS,border:`2px solid ${C.gold}`,borderRadius:"12px",padding:"24px 16px",cursor:"pointer",color:C.gold,fontFamily:"Georgia,serif",fontSize:"14px",fontWeight:"bold",textAlign:"center"}}>
             <div style={{fontSize:"26px",marginBottom:"8px"}}>👑</div>
-            <div>Director</div>
+            <div>Credit Analyst</div>
             <div style={{fontSize:"10px",color:C.muted,marginTop:"4px",fontWeight:"normal"}}>Full dashboard + approvals</div>
           </button>
           {/* Admin */}
@@ -1145,7 +1145,7 @@ function App() {
             <div style={G2}><div><label style={LBL}>Purpose of Loan</label><input style={INP} value={lForm.purposeOfLoan} onChange={e=>setLForm(p=>({...p,purposeOfLoan:e.target.value}))}/></div><div><label style={LBL}>Source of Repayment</label><input style={INP} value={lForm.primarySourceOfRepayment} onChange={e=>setLForm(p=>({...p,primarySourceOfRepayment:e.target.value}))}/></div></div>
             <div style={G2}><div><label style={LBL}>Branch</label><select style={INP} value={lForm.branch} onChange={e=>setLForm(p=>({...p,branch:e.target.value}))}>{branches.map(b=><option key={b} value={b}>{b}</option>)}</select></div><div><label style={LBL}>Submission Date</label><input style={INP} type="date" value={lForm.submissionDate} onChange={e=>setLForm(p=>({...p,submissionDate:e.target.value}))}/></div></div>
           </div>
-          <button disabled={syncing} onClick={submitLoan} style={{background:syncing?C.muted:C.green,color:"#fff",border:"none",borderRadius:"8px",padding:"12px 24px",cursor:syncing?"not-allowed":"pointer",fontWeight:"bold",fontSize:"14px",width:"100%",fontFamily:"Georgia,serif"}}>{syncing?"Saving...":"SUBMIT TO DIRECTOR FOR APPROVAL"}</button>
+          <button disabled={syncing} onClick={submitLoan} style={{background:syncing?C.muted:C.green,color:"#fff",border:"none",borderRadius:"8px",padding:"12px 24px",cursor:syncing?"not-allowed":"pointer",fontWeight:"bold",fontSize:"14px",width:"100%",fontFamily:"Georgia,serif"}}>{syncing?"Saving...":"SUBMIT TO CREDIT ANALYST FOR APPROVAL"}</button>
           <div style={{marginTop:"24px"}}>
             <div style={SEC}>All Loan Applications</div>
             <div style={CARD}><table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr><th style={TH}>ID</th><th style={TH}>Member</th><th style={TH}>Requested</th><th style={TH}>Approved</th><th style={TH}>Cycle</th><th style={TH}>Status</th><th style={TH}>Action</th></tr></thead>
@@ -1153,7 +1153,7 @@ function App() {
             <td style={TD}>{l.status==="APPROVED"&&(signedLoans[l.id]
         ?<button disabled={syncing} onClick={()=>markDisbursed(l)} style={{background:syncing?C.muted:C.green,color:"#fff",border:"none",borderRadius:"6px",padding:"6px 12px",cursor:syncing?"not-allowed":"pointer",fontWeight:"bold",fontSize:"11px",fontFamily:"Georgia,serif"}}>MARK DISBURSED</button>
         :<span style={{color:C.gold,fontSize:"11px",fontFamily:"monospace"}}>Awaiting client signature</span>
-      )}{l.status==="PENDING"&&<span style={{color:C.gold,fontSize:"11px"}}>Awaiting Director</span>}{l.status==="ACTIVE"&&<span style={{color:C.green,fontSize:"11px"}}>Active</span>}{l.status==="REJECTED"&&<span style={{color:C.red,fontSize:"11px"}}>Rejected</span>}{l.status==="PAID_OFF"&&<span style={{color:C.muted,fontSize:"11px"}}>Paid Off</span>}</td></tr>)}</tbody></table></div>
+      )}{l.status==="PENDING"&&<span style={{color:C.gold,fontSize:"11px"}}>Awaiting Credit Analyst</span>}{l.status==="ACTIVE"&&<span style={{color:C.green,fontSize:"11px"}}>Active</span>}{l.status==="REJECTED"&&<span style={{color:C.red,fontSize:"11px"}}>Rejected</span>}{l.status==="PAID_OFF"&&<span style={{color:C.muted,fontSize:"11px"}}>Paid Off</span>}</td></tr>)}</tbody></table></div>
           </div>
         </>}
 
@@ -1219,7 +1219,7 @@ function App() {
     </div>
   );
 
-  // ── DIRECTOR PORTAL ───────────────────────────────────────────────────────────
+  // ── CREDIT ANALYST PORTAL ───────────────────────────────────────────────────────────
   return (
     <div style={{minHeight:"100vh",background:C.bg}}>
       {toast&&<div style={{position:"fixed",top:18,right:18,zIndex:2000,background:toast.color,color:"#fff",padding:"11px 18px",borderRadius:"8px",fontSize:"12px",fontFamily:"monospace",boxShadow:"0 4px 20px rgba(0,0,0,0.5)",animation:"fadeIn 0.2s ease"}}>{toast.msg}</div>}
