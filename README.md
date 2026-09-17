@@ -1,8 +1,8 @@
 # movican
 Movican Micro Credit Enterprise System
 
-## SLEMV Analytics — startup waitlist landing page
-`/consulting/index.html` is a standalone landing page for SLEMV Analytics'
+## A&D Analytics — startup waitlist landing page
+`/consulting/index.html` is a standalone landing page for A&D Analytics'
 growth/product analytics service for startups, with an email waitlist form.
 It does not touch or depend on the Movican app above.
 
